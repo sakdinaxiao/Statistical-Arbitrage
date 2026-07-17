@@ -63,7 +63,7 @@ class PairTrading:
 
         if past_price_x is None or past_price_y is None:
             print("main: failed to initialize past price")
-            return
+            raise Exception("Failed to fetch historical data")
             
         #Align timestamps chronologically so X and Y match perfectly
         common_times = sorted(set(past_price_x.keys()).intersection(set(past_price_y.keys())))
@@ -110,7 +110,7 @@ class PairTrading:
         
         if len(common_times) < self.window:
             print(f"main: not enough overlapping historical data (found {len(common_times)})")
-            return
+            raise Exception("Not enough historical data to initialize math objects")
 
         print(f"main: successfully prepared {len(common_times)} log prices")
 
@@ -263,8 +263,18 @@ class PairTrading:
                     
                     current_ev = None
                     realized_pnl = None
+                    unrealized_pnl = None
                     try:
                         realized_pnl = self.bybit.get_realized_pnl([self.coin_x, self.coin_y])
+                        
+                        status = self.bybit.get_account_status()
+                        if status and "positions" in status:
+                            upnl_sum = 0.0
+                            for p in status["positions"]:
+                                if p["symbol"] in [self.coin_x, self.coin_y]:
+                                    upnl_sum += float(p["unrealisedPnl"])
+                            unrealized_pnl = upnl_sum
+                            
                         spread_series = self.welford.get_spread_series()
                         if len(spread_series) >= 2 and z_score is not None and not np.isnan(z_score) and not np.isnan(beta):
                             sigma = float(np.std(spread_series))
@@ -275,7 +285,20 @@ class PairTrading:
                     except Exception:
                         pass
                         
-                    self.dashboard.update(self.executor.state.name, z_score, beta, is_stat, pair_str, raw_x, raw_y, current_ev, realized_pnl)
+                    self.dashboard.update(
+                        self.executor.state.name, 
+                        z_score, 
+                        beta, 
+                        is_stat, 
+                        pair_str, 
+                        raw_x, 
+                        raw_y, 
+                        current_ev, 
+                        realized_pnl,
+                        unrealized_pnl,
+                        getattr(self, 'dynamic_entry', 1.5),
+                        getattr(self, 'dynamic_stoploss', 4.0)
+                    )
                 except Exception:
                     pass
                 # --- DASHBOARD UPDATE END ---
