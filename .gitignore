@@ -1,0 +1,19 @@
+# Environments
+.env
+venv/
+env/
+.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / OS files
+.DS_Store
+.vscode/
+.idea/
+
+# Bot Logs / Data
+*.csv
+logs/
