@@ -3,9 +3,9 @@ from data.enums import Action, State
 import numpy as np 
 
 class StatArbStrategy:
-    def __init__(self,coin_x,coin_y):
-        self.entry = 1.5
-        self.stoploss = 4.0 #tune these 3 for real market
+    def __init__(self,coin_x,coin_y, entry=1.5, stoploss=4.0):
+        self.entry = entry
+        self.stoploss = stoploss #tune these 3 for real market
         self.profit = 0.0
         
         self.coin_x = coin_x
