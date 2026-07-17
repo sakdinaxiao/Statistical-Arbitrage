@@ -6,11 +6,9 @@ class StatArbStrategy:
     def __init__(self,coin_x,coin_y, entry=1.5, stoploss=4.0):
         if np.isnan(entry):
             entry = 1.5
-        if np.isnan(stoploss):
-            stoploss = 4.0
             
         self.entry = max(1.2, min(entry, 3.0))
-        self.stoploss = self.entry * 2.0
+        self.stoploss = 4.0 if np.isnan(stoploss) else self.entry * 2.0
 
         self.profit = 0.0
         
