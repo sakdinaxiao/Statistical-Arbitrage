@@ -95,10 +95,10 @@ class PairTrading:
             
             if np.isnan(percentile_95):
                 self.dynamic_entry = 1.5
+                self.dynamic_stoploss = 4.0
             else:
                 self.dynamic_entry = max(1.2, min(percentile_95, 3.0))
-                
-            self.dynamic_stoploss = self.dynamic_entry * 2.0
+                self.dynamic_stoploss = self.dynamic_entry * 2.0
             
         print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
         # --- DYNAMIC Z-SCORE END ---
