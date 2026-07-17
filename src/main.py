@@ -139,7 +139,12 @@ class PairTrading:
     def initialize_others(self):
         self.logger = TradeLogger()
 
-        self.strategy = StatArbStrategy(self.coin_x,self.coin_y)
+        self.strategy = StatArbStrategy(
+            self.coin_x,
+            self.coin_y,
+            entry=getattr(self, 'dynamic_entry', 1.5),
+            stoploss=getattr(self, 'dynamic_stoploss', 4.0)
+        )
 
         self.executor = OrderExecutor(
             self.bybit.session,
