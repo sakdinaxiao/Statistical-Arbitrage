@@ -81,6 +81,29 @@ class PairTrading:
         first_beta = ols_model.params[1]                                                                                                    
         historical_spread = self.past_log_y - (first_beta * self.past_log_x + first_alpha)      
 
+        # --- DYNAMIC Z-SCORE START ---
+        spread_mean = np.mean(historical_spread)
+        spread_std = np.std(historical_spread)
+        
+        if spread_std == 0.0 or np.isnan(spread_std):
+            self.dynamic_entry = 1.5
+            self.dynamic_stoploss = 4.0
+        else:
+            historical_z_scores = (historical_spread - spread_mean) / spread_std
+            abs_z_scores = np.abs(historical_z_scores)
+            percentile_95 = np.percentile(abs_z_scores, 95)
+            
+            if np.isnan(percentile_95):
+                self.dynamic_entry = 1.5
+            else:
+                self.dynamic_entry = max(1.2, min(percentile_95, 3.0))
+                
+            self.dynamic_stoploss = self.dynamic_entry * 2.0
+            
+        print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
+        # --- DYNAMIC Z-SCORE END ---
+
+
         self.ev_calculator = ExpectedValueCalculator(self.qty_y, self.FEERATE,self.max_bars)
         first_hl = self.ev_calculator.half_life(historical_spread)
         self.window = int(first_hl * 2)
