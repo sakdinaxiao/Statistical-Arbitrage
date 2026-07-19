@@ -17,3 +17,6 @@ __pycache__/
 # Bot Logs / Data
 *.csv
 logs/
+
+# Specific Bot Runners
+src/bot*.py

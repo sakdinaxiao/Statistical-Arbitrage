@@ -86,18 +86,17 @@ class OrderExecutor:
         val_y = qty_y_rounded * signal.price_y
 
         #pump up to minimum value
+        final_qty_y = qty_y_rounded
         if val_x < 5.5 or val_y < 5.5:
             raw_val_x = raw_qty_x * signal.price_x
             raw_val_y = self.qty_y * signal.price_y
             scale = max(6.0 / raw_val_x if raw_val_x > 0 else 1, 6.0 / raw_val_y if raw_val_y > 0 else 1)
             qty_x = float(self._round_qty(raw_qty_x * scale, signal.coin_x))
-            self.qty_y = float(self._round_qty(self.qty_y * scale, signal.coin_y))
-        else:
-            self.qty_y = qty_y_rounded
+            final_qty_y = float(self._round_qty(self.qty_y * scale, signal.coin_y))
         
         try:
             async with asyncio.TaskGroup() as tg:
-                order_y = tg.create_task(self._place_order(y_side,signal.coin_y, self.qty_y,reduceOnly=reduceOnly))
+                order_y = tg.create_task(self._place_order(y_side,signal.coin_y, final_qty_y,reduceOnly=reduceOnly))
                 order_x = tg.create_task(self._place_order(x_side,signal.coin_x, qty_x,reduceOnly=reduceOnly))
         except Exception as e:
             print(f"executor: cannot place order error {e}")
@@ -106,7 +105,7 @@ class OrderExecutor:
         res_x = order_x.result()
 
         print("--Execution--")
-        print(f"Y {signal.coin_y}: {y_side} {self.qty_y} -> {res_y}")
+        print(f"Y {signal.coin_y}: {y_side} {final_qty_y} -> {res_y}")
         print(f"X {signal.coin_x}: {x_side} {qty_x} -> {res_x}")       
 
         realized_pnl = ""
@@ -123,7 +122,7 @@ class OrderExecutor:
 
         #log order
         if self.logger is not None:
-            self.logger.log_order(signal, qty_x, self.qty_y, res_y is not None, res_x is not None, realized_pnl)
+            self.logger.log_order(signal, qty_x, final_qty_y, res_y is not None, res_x is not None, realized_pnl)
 
         #if one leg fail
         if res_y is None or res_x is None:

@@ -162,22 +162,15 @@ class BybitService:
     async def get_instruments_info(self, symbols: list):
         # Fetches lot size and min order qty for requested symbols
         try:
-            # We can use asyncio.to_thread if we want to be strictly non-blocking,
-            # but since this is at startup, synchronous get_instruments_info is okay.
-            response = self.session.get_instruments_info(category="linear")
-            if response["retCode"] != 0:
-                print(f"api: {response.get('retMsg')}")
-                return None
-            
             rules = {}
-            for item in response.get("result", {}).get("list", []):
-                symbol = item["symbol"]
-                if symbol in symbols:
+            for sym in symbols:
+                response = self.session.get_instruments_info(category="linear", symbol=sym)
+                if response.get("retCode") == 0 and response.get("result", {}).get("list"):
+                    item = response["result"]["list"][0]
                     lot_filter = item.get("lotSizeFilter", {})
                     qty_step = lot_filter.get("qtyStep", "0.001")
                     min_qty = lot_filter.get("minOrderQty", "0.001")
-                    rules[symbol] = (str(qty_step), str(min_qty))
-                    
+                    rules[sym] = (str(qty_step), str(min_qty))
             return rules
         except Exception as e:
             print(f"api: failed to fetch instrument info: {e}")
