@@ -109,17 +109,6 @@ class OrderExecutor:
         print(f"X {signal.coin_x}: {x_side} {qty_x} -> {res_x}")       
 
         realized_pnl = ""
-        if action in (Action.EXIT_LOSS, Action.EXIT_PROFIT, Action.EXIT_REGIME) and res_y is not None and res_x is not None:
-            await asyncio.sleep(2)
-            try:
-                pnl_y = await asyncio.to_thread(self.session.get_closed_pnl, category="linear", symbol=signal.coin_y, limit=1)
-                pnl_x = await asyncio.to_thread(self.session.get_closed_pnl, category="linear", symbol=signal.coin_x, limit=1)
-                val_y = float(pnl_y["result"]["list"][0]["closedPnl"]) if pnl_y.get("result", {}).get("list") else 0.0
-                val_x = float(pnl_x["result"]["list"][0]["closedPnl"]) if pnl_x.get("result", {}).get("list") else 0.0
-                realized_pnl = round(val_y + val_x, 4)
-            except Exception as e:
-                print(f"executor: failed to fetch pnl for logger: {e}")
-
         #log order
         if self.logger is not None:
             self.logger.log_order(signal, qty_x, final_qty_y, res_y is not None, res_x is not None, realized_pnl)
