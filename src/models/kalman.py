@@ -13,7 +13,12 @@ class Kalman_2D:
         self.p = ols_model.cov_params()
 
         self.R = np.array([[ols_model.mse_resid]])   # measurement noise = warmup residual variance (auto-scales to log units)
-        self.Q = np.array([[6e-7, 0], [0, 6e-9]])     #PLS TUNE ts like dynamically change by each pair would be nice maybe using some algo??? ML??
+        
+        # Dynamically scale Q (process noise) based on R (measurement noise)
+        # This prevents the filter from overfitting to noise and suppressing the spread variance
+        delta_alpha = self.R[0,0] * 1e-4
+        delta_beta = self.R[0,0] * 1e-5
+        self.Q = np.array([[delta_alpha, 0], [0, delta_beta]])
         
         #Do S*S.T = original matrix prevent negative number from rounding the precision
         

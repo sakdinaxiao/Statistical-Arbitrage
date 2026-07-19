@@ -87,9 +87,11 @@ async def main():
         if price1 > price2:
             x_sym, y_sym = sym2, sym1
             mapx, mapy = map2, map1
+            price_y = price1
         else:
             x_sym, y_sym = sym1, sym2
             mapx, mapy = map1, map2
+            price_y = price2
 
         log_x = [math.log(mapx[t]) for t in common]
         log_y = [math.log(mapy[t]) for t in common]
@@ -101,14 +103,14 @@ async def main():
 
         hl_ok = hl is not None and 0 < hl <= MAX_BARS
         tradeable = p_full < 0.05 and p_win < 0.05 and hl_ok
-        rows.append((x_sym, y_sym, p_full, p_win, beta, hl, tradeable, len(common)))
+        rows.append((x_sym, y_sym, p_full, p_win, beta, hl, tradeable, len(common), price_y))
 
     rows.sort(key=lambda r: (r[3], r[5] if r[5] is not None else 1e9))
 
     print("\n" + "=" * 86)
     print(f"{'pair':<20}{'p_full':>9}{'p_win':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
     print("=" * 86)
-    for x, y, pf, pw, beta, hl, ok, n in rows:
+    for x, y, pf, pw, beta, hl, ok, n, price_y in rows:
         hl_s = f"{hl:.1f}" if hl is not None else "drift"
         flag = "  YES" if ok else ""
         print(f"{x+'/'+y:<20}{pf:>9.4f}{pw:>9.4f}{beta:>9.3f}{hl_s:>11}{n:>7}{flag}")
@@ -117,8 +119,8 @@ async def main():
     print("\n" + "=" * 86)
     if winners:
         print(f"{len(winners)} tradeable pair(s) (p_full<0.05 AND p_win<0.05 AND 0<half_life<={MAX_BARS} bars):")
-        for x, y, pf, pw, beta, hl, ok, n in winners:
-            print(f"  coinlist = [\"{x}\", \"{y}\"]   # p_win={pw:.4f}, half_life={hl:.1f} bars")
+        for x, y, pf, pw, beta, hl, ok, n, price_y in winners:
+            print(f"  coinlist = [\"{x}\", \"{y}\"]   # p_win={pw:.4f}, half_life={hl:.1f} bars, price_y=${price_y:.3f}")
     else:
         print("No pair currently clears both gates.")
 

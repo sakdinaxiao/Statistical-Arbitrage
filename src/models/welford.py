@@ -36,13 +36,14 @@ class WelfordZScore:
         self.frozen_mean = self.mean
         self.frozen_std = std     
 
-    def z_score_cal(self,x,y,alpha,beta,hold=False):
+    def z_score_cal(self,x,y,alpha,beta,hold=False, spread=None):
         if np.isnan(x) or np.isnan(y) or np.isnan(alpha) or np.isnan(beta):
             return self.z_score, np.nan
         else:
 
             #WelFord online -- keep the rolling window live so half-life stays fresh
-            spread = y - ((beta*x) + alpha)
+            if spread is None:
+                spread = y - ((beta*x) + alpha)
             old_value = self.s_array[self.index]
 
             self.s_array[self.index] = spread

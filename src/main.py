@@ -91,13 +91,13 @@ class PairTrading:
         else:
             historical_z_scores = (historical_spread - spread_mean) / spread_std
             abs_z_scores = np.abs(historical_z_scores)
-            percentile_95 = np.percentile(abs_z_scores, 95)
+            percentile_80 = np.percentile(abs_z_scores, 80)
             
-            if np.isnan(percentile_95):
+            if np.isnan(percentile_80):
                 self.dynamic_entry = 1.5
                 self.dynamic_stoploss = 4.0
             else:
-                self.dynamic_entry = max(1.2, min(percentile_95, 3.0))
+                self.dynamic_entry = max(1.2, min(percentile_80, 3.0))
                 self.dynamic_stoploss = self.dynamic_entry * 2.0
             
         print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
@@ -211,7 +211,7 @@ class PairTrading:
                     print("main: beta spike detected. Retesting stationary and skipping entries.")
                     self.cointegration.force_retest(self.max_bars)
 
-                z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding)
+                z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
 
                 signal = self.strategy.create_signal(
                     z_score=z_score,
@@ -254,7 +254,7 @@ class PairTrading:
                     
                     #closing
                     if signal.action != Action.HOLD:                                                                              
-                            await self.executor.execute_signal(signal, self.qty_y)
+                            await self.executor.execute_signal(signal)
 
                 # --- DASHBOARD UPDATE START ---
                 try:
