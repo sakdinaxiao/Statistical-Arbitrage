@@ -121,6 +121,18 @@ async def main():
         print(f"{len(winners)} tradeable pair(s) (p_full<0.05 AND p_win<0.05 AND 0<half_life<={MAX_BARS} bars):")
         for x, y, pf, pw, beta, hl, ok, n, price_y in winners:
             print(f"  coinlist = [\"{x}\", \"{y}\"]   # p_win={pw:.4f}, half_life={hl:.1f} bars, price_y=${price_y:.3f}")
+        
+        print("\n" + "=" * 86)
+        print("Mutually Exclusive Tradeable Pairs:")
+        used_coins = set()
+        exclusive_pairs = []
+        for x, y, pf, pw, beta, hl, ok, n, price_y in winners:
+            if x not in used_coins and y not in used_coins:
+                exclusive_pairs.append((x, y, pw, hl, price_y))
+                used_coins.add(x)
+                used_coins.add(y)
+        for i, (x, y, pw, hl, price_y) in enumerate(exclusive_pairs):
+            print(f"  Bot {i+1}: coinlist = [\"{x}\", \"{y}\"]   # p_win={pw:.4f}, half_life={hl:.1f} bars, price_y=${price_y:.3f}")
     else:
         print("No pair currently clears both gates.")
 
