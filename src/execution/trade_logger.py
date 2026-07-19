@@ -4,8 +4,7 @@ from datetime import datetime
 
 HEADER = [
     "timestamp", "action", "coin_x", "coin_y", "z_score", "beta",
-    "price_x", "price_y", "qty_x", "qty_y", "y_ok", "x_ok", "status", "reason",
-    "realized_pnl"
+    "price_x", "price_y", "qty_x", "qty_y", "y_ok", "x_ok", "status", "reason"
 ]
 
 
@@ -18,7 +17,7 @@ class TradeLogger:
         with open(self.path, "w", newline="") as f:
             csv.writer(f).writerow(HEADER)
 
-    def _row(self, payload, qty_x, qty_y, y_ok, x_ok, status, reason, pnl=""):
+    def _row(self, payload, qty_x, qty_y, y_ok, x_ok, status, reason):
         # logging must never break the trading loop: swallow any write error.
         try:
             ts = datetime.fromtimestamp(payload.timestamp_ns / 1e9).isoformat()
@@ -26,14 +25,14 @@ class TradeLogger:
                 csv.writer(f).writerow([
                     ts, payload.action.value, payload.coin_x, payload.coin_y,
                     payload.z_score, payload.beta, payload.price_x, payload.price_y,
-                    qty_x, qty_y, y_ok, x_ok, status, reason, pnl
+                    qty_x, qty_y, y_ok, x_ok, status, reason
                 ])
         except Exception as e:
             print(f"trade_logger: failed to write row: {e}")
 
-    def log_order(self, payload, qty_x, qty_y, y_ok, x_ok, pnl=""):
+    def log_order(self, payload, qty_x, qty_y, y_ok, x_ok):
         status = "filled" if (y_ok and x_ok) else "failed"
-        self._row(payload, qty_x, qty_y, y_ok, x_ok, status, payload.reason, pnl)
+        self._row(payload, qty_x, qty_y, y_ok, x_ok, status, payload.reason)
 
     def log_blocked(self, payload, reason):
         self._row(payload, "", "", "", "", "blocked", reason)

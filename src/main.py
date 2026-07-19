@@ -262,19 +262,7 @@ class PairTrading:
                     pair_str = f"{self.coin_x} / {self.coin_y}"
                     
                     current_ev = None
-                    realized_pnl = None
-                    unrealized_pnl = None
                     try:
-                        realized_pnl = self.bybit.get_realized_pnl([self.coin_x, self.coin_y])
-                        
-                        status = self.bybit.get_account_status()
-                        if status and "positions" in status:
-                            upnl_sum = 0.0
-                            for p in status["positions"]:
-                                if p["symbol"] in [self.coin_x, self.coin_y]:
-                                    upnl_sum += float(p["unrealisedPnl"])
-                            unrealized_pnl = upnl_sum
-                            
                         spread_series = self.welford.get_spread_series()
                         if len(spread_series) >= 2 and z_score is not None and not np.isnan(z_score) and not np.isnan(beta):
                             sigma = float(np.std(spread_series))
@@ -294,8 +282,6 @@ class PairTrading:
                         raw_x, 
                         raw_y, 
                         current_ev, 
-                        realized_pnl,
-                        unrealized_pnl,
                         getattr(self, 'dynamic_entry', 1.5),
                         getattr(self, 'dynamic_stoploss', 4.0)
                     )

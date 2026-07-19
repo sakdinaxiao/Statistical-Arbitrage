@@ -108,10 +108,9 @@ class OrderExecutor:
         print(f"Y {signal.coin_y}: {y_side} {final_qty_y} -> {res_y}")
         print(f"X {signal.coin_x}: {x_side} {qty_x} -> {res_x}")       
 
-        realized_pnl = ""
         #log order
         if self.logger is not None:
-            self.logger.log_order(signal, qty_x, final_qty_y, res_y is not None, res_x is not None, realized_pnl)
+            self.logger.log_order(signal, qty_x, final_qty_y, res_y is not None, res_x is not None)
 
         #if one leg fail
         if res_y is None or res_x is None:

@@ -130,7 +130,6 @@ class BybitService:
                     "size": p["size"],
                     "avgPrice": p["avgPrice"],
                     "markPrice": p["markPrice"],
-                    "unrealisedPnl": p["unrealisedPnl"],
                 }
                 for p in pos_list
             ]
@@ -147,17 +146,6 @@ class BybitService:
             print(f"api: bybit reject request: {e}")
             return None
 
-    def get_realized_pnl(self, symbols: list):
-        try:
-            total_pnl = 0.0
-            for sym in symbols:
-                res = self.session.get_closed_pnl(category="linear", symbol=sym)
-                if res.get("retCode") == 0 and res.get("result", {}).get("list"):
-                    for trade in res["result"]["list"]:
-                        total_pnl += float(trade.get("closedPnl", 0))
-            return total_pnl
-        except Exception:
-            return None
 
     async def get_instruments_info(self, symbols: list):
         # Fetches lot size and min order qty for requested symbols
