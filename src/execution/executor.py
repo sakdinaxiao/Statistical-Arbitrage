@@ -25,18 +25,30 @@ class OrderExecutor:
     
     async def _place_order(self,side,symbol,qty,reduceOnly=False):
         try:
-            # pybit HTTP is blocking; run it off the event loop so the two legs
-            # placed via TaskGroup actually fire in parallel.
-            order = await asyncio.to_thread(
-                self.session.place_order,
-                category="linear",
-                symbol=symbol,
-                side=side,
-                qty=str(qty),
-                timeInForce="IOC",
-                orderType="Market",
-                reduceOnly=reduceOnly,
-            )
+            if reduceOnly:
+                order = await asyncio.to_thread(
+                    self.session.place_order,
+                    category="linear",
+                    symbol=symbol,
+                    side=side,
+                    qty="0",
+                    timeInForce="IOC",
+                    orderType="Market",
+                    reduceOnly=reduceOnly,
+                )
+            else:
+                # pybit HTTP is blocking; run it off the event loop so the two legs
+                # placed via TaskGroup actually fire in parallel.
+                order = await asyncio.to_thread(
+                    self.session.place_order,
+                    category="linear",
+                    symbol=symbol,
+                    side=side,
+                    qty=str(qty),
+                    timeInForce="IOC",
+                    orderType="Market",
+                    reduceOnly=reduceOnly,
+                )
 
             return symbol, order
         except Exception as e:
