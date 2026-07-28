@@ -27,6 +27,9 @@ class StatArbStrategy:
                 reason= "Invalid number"
             )
         
+        # Surgical fix: Round z_score to 1 decimal place so values close to boundaries trigger slightly earlier
+        z_score = round(z_score, 1)
+
         #hold
         action = Action.HOLD
         reason = f"holding: z={z_score:.3f}, state={state.name}"
@@ -46,6 +49,7 @@ class StatArbStrategy:
 
             elif z_score <= self.profit: # z hit profit
                 action = Action.EXIT_PROFIT
+                z_score = round(z_score, 1)
                 reason = f"z_score: {z_score} is hitting {self.profit}"
 
         elif state == State.long_y: # on long position
@@ -55,6 +59,7 @@ class StatArbStrategy:
 
             elif z_score >= self.profit:
                 action = Action.EXIT_PROFIT
+                z_score = round(z_score, 1)
                 reason = f"z_score: {z_score} is hitting {self.profit}"
 
         return Signal(

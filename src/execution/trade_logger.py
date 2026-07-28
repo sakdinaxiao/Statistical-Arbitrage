@@ -27,7 +27,8 @@ class TradeLogger:
     def _row(self, payload, qty_x, qty_y, y_ok, x_ok, status, reason, result=""):
         # logging must never break the trading loop: swallow any write error.
         try:
-            ts = datetime.fromtimestamp(payload.timestamp_ns / 1e9).isoformat()
+            # Format as clean human-readable local time (matches the dashboard)
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with open(self.path, "a", newline="") as f:
                 csv.writer(f).writerow([
                     ts, payload.action.value, payload.coin_x, payload.coin_y,

@@ -32,8 +32,8 @@ CONCURRENCY = 8     # parallel symbol fetches
 
 async def _fetch_symbol(api, sym, sem):
     async with sem:
-        # Using 7 days to match the optimal quant sweet spot!
-        return sym, await api.get_past_price(sym, str(INTERVAL), days=7)
+        # 14 days to match the live bot's structure window
+        return sym, await api.get_past_price(sym, str(INTERVAL), days=14)
 
 def evaluate(log_x, log_y, ev_calculator):
     def get_p_val(datax, datay):
@@ -62,7 +62,7 @@ async def main():
     ev_calculator = ExpectedValueCalculator(qty_y=0.1, fee_rate=0.0005, max_bars=MAX_BARS)
     api = BybitService(key, secret, testnet=False, demo=True)
 
-    print(f"Fetching {len(UNIVERSE)} symbols ({INTERVAL}m, 7d, {CONCURRENCY} at a time)...")
+    print(f"Fetching {len(UNIVERSE)} symbols ({INTERVAL}m, 14d, {CONCURRENCY} at a time)...")
     sem = asyncio.Semaphore(CONCURRENCY)
     results = await asyncio.gather(
         *(_fetch_symbol(api, sym, sem) for sym in UNIVERSE)

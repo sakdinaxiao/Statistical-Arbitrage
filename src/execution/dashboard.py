@@ -10,8 +10,9 @@ class LiveDashboard:
     def stop(self):
         print(f"=== Stopped {self.title} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
 
-    def update(self, state_name, z_score, beta, is_stat, target_pair, raw_x, raw_y, ev, dynamic_entry=1.5, dynamic_stoploss=4.0):
-        stat_icon = "✅" if is_stat else "❌"
+    def update(self, state_name, z_score, beta, is_trade_stat, is_structure_stat, target_pair, raw_x, raw_y, ev, dynamic_entry=1.5, dynamic_stoploss=4.0):
+        stat_t_icon = "✅" if is_trade_stat else "❌"
+        stat_s_icon = "✅" if is_structure_stat else "❌"
         
         # Safely format numbers that might be None
         ev_str = f"{ev:.4f}" if ev is not None else "N/A"
@@ -27,7 +28,7 @@ class LiveDashboard:
         
         output = (
             f"[{timestamp}] {target_pair} | P(X/Y): {p_x}/{p_y} | "
-            f"State: {state_name} | Stat: {stat_icon} | Beta: {beta_str} | "
+            f"State: {state_name} | Stat(T/S): {stat_t_icon}/{stat_s_icon} | Beta: {beta_str} | "
             f"Z: {z_str} (Target: {target_z_str}) | EV: {ev_str} USDT"
         )
         print(output)
