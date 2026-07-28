@@ -12,6 +12,8 @@ class WelfordZScore:
 
         self.frozen_mean = 0.0
         self.frozen_std = 0.0
+        self.frozen_alpha = initalpha
+        self.frozen_beta = initbeta
 
         if len(initx) != self.window or len(inity) != self.window:
             print(f"Error: Initialization arrays must be of length {self.window}")
@@ -64,16 +66,20 @@ class WelfordZScore:
             if hold:
                 # position open: measure z against the reference frozen at entry,
                 # so the rolling mean can't chase the spread into a false z=0 exit
+                # We also MUST evaluate the live prices using the frozen cointegration vector!
+                eval_spread = y - ((self.frozen_beta * x) + self.frozen_alpha)
                 ref_mean, ref_std = self.frozen_mean, self.frozen_std
             else:
                 # flat: live reference, snapshot it so it's right the instant we enter
+                self.frozen_alpha, self.frozen_beta = alpha, beta
+                eval_spread = spread
                 ref_mean, ref_std = self.mean, std
                 self.frozen_mean, self.frozen_std = self.mean, std
 
             if ref_std == 0.0: 
                 self.z_score = 0.0
             else:
-                self.z_score = (spread - ref_mean) / ref_std
+                self.z_score = (eval_spread - ref_mean) / ref_std
 
         return self.z_score
     

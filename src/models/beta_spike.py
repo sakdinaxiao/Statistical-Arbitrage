@@ -93,13 +93,13 @@ class BetaChecker:
         # Need a full beta_spike_window of Δβ before the MAD estimate is trustworthy
         self.warmup_count += 1
         if self.warmup_count < self.beta_spike_window:
-            return True
+            return False
 
         if mad == 0.0:
-            return True   # no variance yet — can't compute, treat as healthy
+            return False   # no variance yet — can't compute, treat as healthy
 
         z = 0.6745 * (p - current_median) / mad
-        return abs(z) < self.z_threshold
+        return abs(z) >= self.z_threshold
 
 
 

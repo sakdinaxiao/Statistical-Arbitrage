@@ -28,7 +28,8 @@ class PairTrading:
         self.symbol_list = symbol_list
         self.coin_x = symbol_list[0]
         self.coin_y = symbol_list[1]
-        self.FEERATE = 0.00055 
+        # Bumped to 0.1% (0.001) to act as a buffer for both exchange fees AND bid-ask slippage on market orders
+        self.FEERATE = 0.001 
         
         self.timeframe = 180 # 3min
         self.window: int
@@ -98,7 +99,7 @@ class PairTrading:
                 self.dynamic_stoploss = 4.0
             else:
                 self.dynamic_entry = max(1.2, min(percentile_80, 3.0))
-                self.dynamic_stoploss = self.dynamic_entry * 2.0
+                self.dynamic_stoploss = self.dynamic_entry * 3.0
             
         print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
         # --- DYNAMIC Z-SCORE END ---
@@ -117,7 +118,7 @@ class PairTrading:
         #stationary 
         self.cointegration = Cointegrate(self.timeframe, self.past_log_x, self.past_log_y)
         self.cointegration.spread_stationaryTest(self.past_log_x,self.past_log_y)    
-        self.cointegration.spread_stationaryTest(self.past_log_x[-self.max_bars:], self.past_log_y[-self.max_bars:])
+        self.cointegration.spread_stationaryTest(self.past_log_x[-self.max_bars:], self.past3_log_y[-self.max_bars:])
         if self.cointegration.stationary_flag is False:
             print("main: stationary flag is False. Stopping the machine.")
             sys.exit(1)
@@ -137,7 +138,7 @@ class PairTrading:
 
     
     def initialize_others(self):
-        self.logger = TradeLogger()
+        self.logger = TradeLogger(self.coin_x, self.coin_y)
 
         self.strategy = StatArbStrategy(
             self.coin_x,
@@ -204,8 +205,15 @@ class PairTrading:
 
                 is_holding = (self.executor.state != State.NoPosition)
 
+                #tighening stoploss for not stationary flag
+                if is_holding and not self.cointegration.stationary_flag:
+                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0) / 2.0
+                else:
+                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
+
+
                 alpha, beta , et = self.kalman.update(logPrice_x,logPrice_y)
-                is_Beta_spike = not self.beta_checker.beta_spike_check(beta)
+                is_Beta_spike = self.beta_checker.beta_spike_check(beta)
 
                 if is_Beta_spike:
                     print("main: beta spike detected. Retesting stationary and skipping entries.")
@@ -255,6 +263,7 @@ class PairTrading:
                     #closing
                     if signal.action != Action.HOLD:                                                                              
                             await self.executor.execute_signal(signal)
+                            self.cointegration.force_retest(self.max_bars)
 
                 # --- DASHBOARD UPDATE START ---
                 try:
