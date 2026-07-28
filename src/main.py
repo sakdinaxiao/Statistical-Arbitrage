@@ -33,6 +33,7 @@ class PairTrading:
         
         self.timeframe = 180 # 3min
         self.window: int
+        self.needs_reset = False # stoploss cooldown: bans re-entry until z-score cools off
         
         self.max_bars = int((8*60) / (self.timeframe/60)) #8 hours
         self.max_bars_structure = int((14*24*60) / (self.timeframe/60)) #14 days
@@ -59,6 +60,31 @@ class PairTrading:
 
         
         
+    def update_dynamic_thresholds(self, spread_series):
+        # --- DYNAMIC Z-SCORE START ---
+        # startup passes the 14d OLS spread; the loop passes the live rolling spread
+        # (called only while flat, so thresholds stay frozen while holding)
+        spread_arr = np.asarray(spread_series, dtype=float)
+        spread_mean = np.mean(spread_arr)
+        spread_std = np.std(spread_arr)
+
+        if spread_std == 0.0 or np.isnan(spread_std):
+            self.dynamic_entry = 1.5
+            self.dynamic_stoploss = 3.0
+        else:
+            z_scores = np.abs((spread_arr - spread_mean) / spread_std)
+            percentile_80 = np.percentile(z_scores, 80)
+
+            if np.isnan(percentile_80):
+                self.dynamic_entry = 1.5
+                self.dynamic_stoploss = 3.0
+            else:
+                self.dynamic_entry = max(1.2, min(percentile_80, 3.0))
+                self.dynamic_stoploss = self.dynamic_entry * 2.0
+
+        print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
+        # --- DYNAMIC Z-SCORE END ---
+
     async def initialize_math_obj(self):
         past_price_x = await self.bybit.get_past_price(self.coin_x, "3", days=14)
         past_price_y = await self.bybit.get_past_price(self.coin_y, "3", days=14)
@@ -83,27 +109,7 @@ class PairTrading:
         first_beta = ols_model.params[1]                                                                                                    
         historical_spread = self.past_log_y - (first_beta * self.past_log_x + first_alpha)      
 
-        # --- DYNAMIC Z-SCORE START ---
-        spread_mean = np.mean(historical_spread)
-        spread_std = np.std(historical_spread)
-        
-        if spread_std == 0.0 or np.isnan(spread_std):
-            self.dynamic_entry = 1.5
-            self.dynamic_stoploss = 4.0
-        else:
-            historical_z_scores = (historical_spread - spread_mean) / spread_std
-            abs_z_scores = np.abs(historical_z_scores)
-            percentile_80 = np.percentile(abs_z_scores, 80)
-            
-            if np.isnan(percentile_80):
-                self.dynamic_entry = 1.5
-                self.dynamic_stoploss = 4.0
-            else:
-                self.dynamic_entry = max(1.2, min(percentile_80, 3.0))
-                self.dynamic_stoploss = self.dynamic_entry * 3.0
-            
-        print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
-        # --- DYNAMIC Z-SCORE END ---
+        self.update_dynamic_thresholds(historical_spread)
 
 
         self.ev_calculator = ExpectedValueCalculator(self.qty_y, self.FEERATE,self.max_bars)
@@ -207,6 +213,12 @@ class PairTrading:
 
                 is_holding = (self.executor.state != State.NoPosition)
 
+                #snapshot freeze: bands recalculate only while flat; an open trade
+                #keeps the exact entry/stoploss it was entered with
+                if not is_holding:
+                    self.update_dynamic_thresholds(self.welford.get_spread_series())
+                    self.strategy.entry = self.dynamic_entry
+
                 #tighening stoploss only on long-term (structure) failure; short-term failure just blocks new entries
                 if is_holding and not self.cointegration.structure_stationary_flag:
                     self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0) / 2.0
@@ -223,6 +235,13 @@ class PairTrading:
 
                 z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
 
+                # --- RESET RULE START ---
+                # stoploss cooldown lifts only when z cools below half the entry line
+                if self.needs_reset and z_score is not None and not np.isnan(z_score) and abs(z_score) < self.strategy.entry / 2.0:
+                    self.needs_reset = False
+                    print("main: z-score cooled off. Stoploss cooldown lifted.")
+                # --- RESET RULE END ---
+
                 signal = self.strategy.create_signal(
                     z_score=z_score,
                     beta=beta,
@@ -234,6 +253,18 @@ class PairTrading:
 
                 if signal.action != Action.HOLD and signal.action != Action.INVALID:
                     is_entry = (signal.action in [Action.SY_LX, Action.SX_LY])
+
+                    #stoploss cooldown bans all new entries until the z-score resets
+                    if is_entry and self.needs_reset:
+                        print("main: stoploss cooldown active. Blocking entry.")
+
+                        # --- LOGGER WIRE START ---
+                        if getattr(self, 'logger', None) is not None:
+                            self.logger.log_blocked(signal, "stoploss cooldown active")
+                        # --- LOGGER WIRE END ---
+
+                        signal.action = Action.HOLD
+                        is_entry = False
 
                     #check for blocking
                     if is_entry and (not is_both_stat or is_Beta_spike):
@@ -266,6 +297,11 @@ class PairTrading:
                     if signal.action != Action.HOLD:                                                                              
                             await self.executor.execute_signal(signal)
                             self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
+
+                            #stoploss hit -> ban re-entry until the z-score resets
+                            if signal.action == Action.EXIT_LOSS:
+                                self.needs_reset = True
+                                print("main: stoploss hit. Cooldown active until z-score resets.")
 
                 # --- DASHBOARD UPDATE START ---
                 try:
