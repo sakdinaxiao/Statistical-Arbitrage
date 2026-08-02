@@ -26,15 +26,15 @@ class ExpectedValueCalculator:
     def assess(self, z_score, beta, price_y, spread_series) -> bool:
         # gate 0: missing data guards
         if z_score is None or beta is None or price_y is None:
-            return False
+            return False, 0
         if np.isnan(z_score) or np.isnan(beta):
-            return False
+            return False, 0
 
         hl = self.half_life(spread_series)
         
         # gate 1: must revert, and revert fast enough (checked early to avoid np.std warnings)
         if hl is None or np.isnan(hl) or hl <= 0 or hl > self.max_bars:
-            return False
+            return False, 0
 
         # everything in dollars so profit and fees are comparable.
         # position is dollar-hedged, so a spread move of (z*sigma) earns notional_y*z*sigma.

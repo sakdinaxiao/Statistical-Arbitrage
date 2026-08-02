@@ -22,6 +22,11 @@ import statsmodels.api as sm
 
 class PairTrading:
     def __init__(self,key,secret,symbol_list=[],qty_y=0.01):
+        self.ENTRY_PERCENTILE = 95
+        self.STOPLOSS_PROPOTION = 3.0
+        self.MAX_BAR = 8
+        self.TIMEFRAME = 300 # 15min
+
         self.qty_y = qty_y
         self.key = key
         self.secret = secret
@@ -31,12 +36,11 @@ class PairTrading:
         # Bumped to 0.1% (0.001) to act as a buffer for both exchange fees AND bid-ask slippage on market orders
         self.FEERATE = 0.001 
         
-        self.timeframe = 180 # 3min
         self.window: int
         self.needs_reset = False # stoploss cooldown: bans re-entry until z-score cools off
         
-        self.max_bars = int((8*60) / (self.timeframe/60)) #8 hours
-        self.max_bars_structure = int((14*24*60) / (self.timeframe/60)) #14 days
+        self.max_bars = int((self.MAX_BAR*60) / (self.TIMEFRAME/60)) #8 hours
+        self.max_bars_structure = int((14*24*60) / (self.TIMEFRAME/60)) #14 days
     
         if len(self.symbol_list) != 2:
             print("main: symbol missing")
@@ -73,21 +77,21 @@ class PairTrading:
             self.dynamic_stoploss = 3.0
         else:
             z_scores = np.abs((spread_arr - spread_mean) / spread_std)
-            percentile_80 = np.percentile(z_scores, 80)
+            percentile = np.percentile(z_scores, self.ENTRY_PERCENTILE)
 
-            if np.isnan(percentile_80):
+            if np.isnan(percentile):
                 self.dynamic_entry = 1.5
                 self.dynamic_stoploss = 3.0
             else:
-                self.dynamic_entry = max(1.2, min(percentile_80, 3.0))
-                self.dynamic_stoploss = self.dynamic_entry * 2.0
+                self.dynamic_entry = max(1.2, min(percentile, 3.0))
+                self.dynamic_stoploss = self.dynamic_entry * self.STOPLOSS_PROPOTION
 
         print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
         # --- DYNAMIC Z-SCORE END ---
 
     async def initialize_math_obj(self):
-        past_price_x = await self.bybit.get_past_price(self.coin_x, "3", days=14)
-        past_price_y = await self.bybit.get_past_price(self.coin_y, "3", days=14)
+        past_price_x = await self.bybit.get_past_price(self.coin_x, str(self.TIMEFRAME/60), days=14)
+        past_price_y = await self.bybit.get_past_price(self.coin_y, str(self.TIMEFRAME/60), days=14)
 
         if past_price_x is None or past_price_y is None:
             print("main: failed to initialize past price")
@@ -123,7 +127,7 @@ class PairTrading:
         print(f"main: successfully prepared {len(common_times)} log prices")
 
         #stationary 
-        self.cointegration = Cointegrate(self.timeframe, self.past_log_x, self.past_log_y)
+        self.cointegration = Cointegrate(self.TIMEFRAME, self.past_log_x, self.past_log_y)
         self.cointegration.structure_stationary_flag = self.cointegration.spread_stationaryTest(self.past_log_x,self.past_log_y)    
         self.cointegration.trade_stationary_flag = self.cointegration.spread_stationaryTest(self.past_log_x[-self.max_bars:], self.past_log_y[-self.max_bars:])
         if self.cointegration.structure_stationary_flag is False or self.cointegration.trade_stationary_flag is False:
@@ -338,7 +342,7 @@ class PairTrading:
                     pass
                 # --- DASHBOARD UPDATE END ---
 
-                await asyncio.sleep(self.timeframe)
+                await asyncio.sleep(self.TIMEFRAME)
             except Exception as e:
                 import traceback
                 print(f'CRITICAL ERROR in main loop: {e}')

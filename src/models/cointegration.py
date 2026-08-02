@@ -66,6 +66,6 @@ class Cointegrate:
 
         result = adfuller(spread)
         p_value = result[1]
-        print(f"cointegration: p_value={p_value:.4f}")
+        
 
         return p_value < 0.05
