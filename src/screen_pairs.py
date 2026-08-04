@@ -102,7 +102,7 @@ async def main():
             continue
 
         hl_ok = hl is not None and 0 < hl <= MAX_BARS
-        tradeable = p_full < 0.05 and p_win < 0.05 and hl_ok
+        tradeable = p_full < 0.1 and p_win < 0.1 and hl_ok
         rows.append((x_sym, y_sym, p_full, p_win, beta, hl, tradeable, len(common), price_y))
 
     rows.sort(key=lambda r: (r[3], r[5] if r[5] is not None else 1e9))
@@ -118,7 +118,7 @@ async def main():
     winners = [r for r in rows if r[6]]
     print("\n" + "=" * 86)
     if winners:
-        print(f"{len(winners)} tradeable pair(s) (p_full<0.05 AND p_win<0.05 AND 0<half_life<={MAX_BARS} bars):")
+        print(f"{len(winners)} tradeable pair(s) (p_full<0.1 AND p_win<0.1 AND 0<half_life<={MAX_BARS} bars):")
         for x, y, pf, pw, beta, hl, ok, n, price_y in winners:
             print(f"  coinlist = [\"{x}\", \"{y}\"]   # p_win={pw:.4f}, half_life={hl:.1f} bars, price_y=${price_y:.3f}")
         

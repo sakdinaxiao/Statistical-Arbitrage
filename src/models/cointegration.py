@@ -68,4 +68,4 @@ class Cointegrate:
         p_value = result[1]
         
 
-        return p_value < 0.05
+        return p_value < 0.1
