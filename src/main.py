@@ -26,6 +26,7 @@ class PairTrading:
         self.STOPLOSS_PROPOTION = 3.0
         self.MAX_BAR = 8
         self.TIMEFRAME = 180 # 3min
+        self.DAYS = 14
 
         self.qty_y = qty_y
         self.key = key
@@ -90,8 +91,8 @@ class PairTrading:
         # --- DYNAMIC Z-SCORE END ---
 
     async def initialize_math_obj(self):
-        past_price_x = await self.bybit.get_past_price(self.coin_x, str(self.TIMEFRAME//60), days=14)
-        past_price_y = await self.bybit.get_past_price(self.coin_y, str(self.TIMEFRAME//60), days=14)
+        past_price_x = await self.bybit.get_past_price(self.coin_x, str(self.TIMEFRAME//60), days=self.DAYS)
+        past_price_y = await self.bybit.get_past_price(self.coin_y, str(self.TIMEFRAME//60), days=self.DAYS)
 
         if past_price_x is None or past_price_y is None:
             print("main: failed to initialize past price")
