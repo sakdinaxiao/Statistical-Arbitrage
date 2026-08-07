@@ -149,7 +149,7 @@ class PairTrading:
 
     
     def initialize_others(self):
-        self.logger = TradeLogger(self.coin_x, self.coin_y)
+        self.logger = TradeLogger(self.coin_x, self.coin_y, self.FEERATE)
 
         self.strategy = StatArbStrategy(
             self.coin_x,
