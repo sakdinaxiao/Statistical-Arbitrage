@@ -23,10 +23,10 @@ import statsmodels.api as sm
 class PairTrading:
     def __init__(self,key,secret,symbol_list=[],qty_y=0.01):
         self.ENTRY_PERCENTILE = 95
-        self.STOPLOSS_GAP = 2.0
+        self.STOPLOSS_GAP = 2.5
         self.MAX_BAR = 8
         self.TIMEFRAME = 180 # 3min
-        self.DAYS = 14
+        self.DAYS = (30*1) #1months
 
         self.qty_y = qty_y
         self.key = key
@@ -41,7 +41,7 @@ class PairTrading:
         self.needs_reset = False # stoploss cooldown: bans re-entry until z-score cools off
         
         self.max_bars = int((self.MAX_BAR*60) / (self.TIMEFRAME/60)) #8 hours
-        self.max_bars_structure = int((14*24*60) / (self.TIMEFRAME/60)) #14 days
+        self.max_bars_structure = int((self.DAYS*24*60) / (self.TIMEFRAME/60)) #1 month
     
         if len(self.symbol_list) != 2:
             print("main: symbol missing")
@@ -67,7 +67,7 @@ class PairTrading:
         
     def update_dynamic_thresholds(self, spread_series):
         # --- DYNAMIC Z-SCORE START ---
-        # startup passes the 14d OLS spread; the loop passes the live rolling spread
+        # startup passes the full-history OLS spread; the loop passes the live rolling spread
         # (called only while flat, so thresholds stay frozen while holding)
         spread_arr = np.asarray(spread_series, dtype=float)
         spread_mean = np.mean(spread_arr)
@@ -85,7 +85,7 @@ class PairTrading:
                 self.dynamic_stoploss = 3.0
             else:
                 self.dynamic_entry = max(1.2, min(percentile, 3.0))
-                self.dynamic_stoploss = min(self.dynamic_entry + self.STOPLOSS_PROPOTION,4.5)
+                self.dynamic_stoploss = min(self.dynamic_entry + self.STOPLOSS_GAP,4.6)
 
         print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
         # --- DYNAMIC Z-SCORE END ---
@@ -118,7 +118,7 @@ class PairTrading:
 
 
         self.ev_calculator = ExpectedValueCalculator(self.qty_y, self.FEERATE,self.max_bars)
-        first_hl = self.ev_calculator.half_life(historical_spread)
+        first_hl = self.ev_calculator.cal_half_life(historical_spread)
         self.window = int(first_hl * 2)
         
         if len(common_times) < self.window:
@@ -207,15 +207,6 @@ class PairTrading:
                 logPrice_x = np.log(raw_x)
                 logPrice_y = np.log(raw_y)
 
-                #update staionary list
-                self.cointegration.update(logPrice_x, logPrice_y, self.max_bars, self.max_bars_structure)
-
-                #check for stationary while trading
-                is_both_stat = self.cointegration.trade_stationary_flag and self.cointegration.structure_stationary_flag
-                if not is_both_stat:
-                    print("main: it's not stationary. Skipping entries.")
-
-
                 is_holding = (self.executor.state != State.NoPosition)
 
                 #snapshot freeze: bands recalculate only while flat; an open trade
@@ -223,13 +214,6 @@ class PairTrading:
                 if not is_holding:
                     self.update_dynamic_thresholds(self.welford.get_spread_series())
                     self.strategy.entry = self.dynamic_entry
-
-                #tighening stoploss only on long-term (structure) failure; short-term failure just blocks new entries
-                if is_holding and not self.cointegration.structure_stationary_flag:
-                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0) / 2.0
-                else:
-                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
-
 
                 alpha, beta , et = self.kalman.update(logPrice_x,logPrice_y)
                 is_Beta_spike = self.beta_checker.beta_spike_check(beta)
@@ -239,6 +223,23 @@ class PairTrading:
                     self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
 
                 z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
+
+                #fresh half-life from the just-updated spread series drives the retest cadence
+                fresh_half_life = self.ev_calculator.cal_half_life(self.welford.get_spread_series())
+
+                #update staionary list (dynamic cadence: 1h flat, 3 * half-life while holding)
+                self.cointegration.update(logPrice_x, logPrice_y, self.max_bars, self.max_bars_structure, is_holding=is_holding, half_life_bars=fresh_half_life)
+
+                #check for stationary while trading
+                is_both_stat = self.cointegration.trade_stationary_flag and self.cointegration.structure_stationary_flag
+                if not is_both_stat:
+                    print("main: it's not stationary. Skipping entries.")
+
+                #tighening stoploss only on long-term (structure) failure; short-term failure just blocks new entries
+                if is_holding and not self.cointegration.structure_stationary_flag:
+                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0) / 2.0
+                else:
+                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
 
                 # --- RESET RULE START ---
                 # stoploss cooldown lifts only when z cools below half the entry line

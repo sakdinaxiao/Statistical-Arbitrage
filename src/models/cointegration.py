@@ -4,8 +4,8 @@ import numpy as np
 from collections import deque
 
 class Cointegrate:
-    def __init__(self,timeFrame,past_x,past_y,retest_trade_hours=2,retest_structure_hours=2):
-        # structure = long-term relationship (14d), trade = short-term stability (8h)
+    def __init__(self,timeFrame,past_x,past_y):
+        # structure = long-term relationship (1mo), trade = short-term stability (8h)
         self.structure_stationary_flag = False
         self.trade_stationary_flag = False
 
@@ -16,28 +16,34 @@ class Cointegrate:
         self.restest_y = deque(past_y,maxlen=len(past_y))
 
         per_hr = 60/(timeFrame/60)
-        self.retest_ticks_trade = per_hr * retest_trade_hours
-        self.retest_ticks_structure = per_hr * retest_structure_hours
+        # flat-state cadence: once per hour; while holding, update() targets 3 * half-life instead
+        self.retest_ticks_flat = per_hr
 
         self.counter_trade = 0
         self.counter_structure = 0
 
         
-    def update(self, new_x, new_y, max_bars_trade, max_bars_structure):
+    def update(self, new_x, new_y, max_bars_trade, max_bars_structure, is_holding=False, half_life_bars=None):
         self.restest_x.append(new_x)
         self.restest_y.append(new_y)
         self.counter_trade += 1
         self.counter_structure += 1
-        
-        if not self.trade_stationary_flag or self.counter_trade >= self.retest_ticks_trade:
-            list_x = list(self.restest_x)
-            list_y = list(self.restest_y)
+
+        # dynamic cadence: 1h flat, 3 * half-life while holding; bad half-life falls back to 1h
+        retest_ticks = self.retest_ticks_flat
+        if is_holding and half_life_bars is not None and np.isfinite(half_life_bars) and half_life_bars > 0:
+            retest_ticks = 3 * half_life_bars
+
+        list_x = list(self.restest_x)
+        list_y = list(self.restest_y)
+
+        # trade test short-circuits on a False flag so a healed spread is caught instantly
+        if not self.trade_stationary_flag or self.counter_trade >= retest_ticks:
             self.trade_stationary_flag = self.spread_stationaryTest(list_x[-max_bars_trade:],list_y[-max_bars_trade:])
             self.counter_trade = 0
 
-        if not self.structure_stationary_flag or self.counter_structure >= self.retest_ticks_structure:
-            list_x = list(self.restest_x)
-            list_y = list(self.restest_y)
+        # structure test is locked to the timer; a 1-month baseline cannot heal in minutes
+        if self.counter_structure >= retest_ticks:
             self.structure_stationary_flag = self.spread_stationaryTest(list_x[-max_bars_structure:],list_y[-max_bars_structure:])
             self.counter_structure = 0
 

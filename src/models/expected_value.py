@@ -7,8 +7,9 @@ class ExpectedValueCalculator:
         self.qty_y = qty_y
         self.fee_rate = fee_rate
         self.max_bars = max_bars   # 60 bars * 5min = 5h, skip trades slower than this
+        self.halflife = 0
 
-    def half_life(self, spread_series):
+    def cal_half_life(self, spread_series):
         # AR(1) on the spread: delta = lam*level + c. lam < 0 means mean reverting.
         s = np.asarray(spread_series, dtype=float)
         if len(s) < 2:
@@ -21,7 +22,8 @@ class ExpectedValueCalculator:
         if lam >= 0:
             return None   # spread is drifting, not coming back
 
-        return -np.log(2) / lam
+        self.halflife = -np.log(2) / lam
+        return self.halflife
 
     def assess(self, z_score, beta, price_y, spread_series) -> bool:
         # gate 0: missing data guards
@@ -30,7 +32,7 @@ class ExpectedValueCalculator:
         if np.isnan(z_score) or np.isnan(beta):
             return False, 0
 
-        hl = self.half_life(spread_series)
+        hl = self.halflife
         
         # gate 1: must revert, and revert fast enough (checked early to avoid np.std warnings)
         if hl is None or np.isnan(hl) or hl <= 0 or hl > self.max_bars:

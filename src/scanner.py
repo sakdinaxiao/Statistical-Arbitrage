@@ -42,11 +42,13 @@ WINDOW = 160        # main.py retests on 160 (8 hours)
 INTERVAL = 3       # candle minutes
 MAX_BARS = 160       # default: reject half-life slower than this
 CONCURRENCY = 8     # parallel symbol fetches
+DAYS = 3*30
+STRUCTURE_BARS = (30*24*60)//INTERVAL  # 1 month, matches main.py max_bars_structure
 
 async def _fetch_symbol(api, sym, sem):
     async with sem:
-        # 14 days to match the live bot's structure window
-        return sym, await api.get_past_price(sym, str(INTERVAL), days=14)
+        # fetch extra history so the 1-month structure slice and 8h trade window are always covered
+        return sym, await api.get_past_price(sym, str(INTERVAL), days=DAYS)
 
 def evaluate(log_x, log_y, ev_calculator):
     def get_p_val(datax, datay):
@@ -56,15 +58,17 @@ def evaluate(log_x, log_y, ev_calculator):
         spread = np.array(datay) - ((beta * np.array(datax)) + alpha)
         return adfuller(spread)[1], beta, spread
 
-    p_full, _, _ = get_p_val(log_x, log_y)
+    struct_x = log_x[-STRUCTURE_BARS:]
+    struct_y = log_y[-STRUCTURE_BARS:]
+    p_struct, _, _ = get_p_val(struct_x, struct_y)
 
     win_x = log_x[-WINDOW:]
     win_y = log_y[-WINDOW:]
     p_win, beta, spread_win = get_p_val(win_x, win_y)
 
-    hl = ev_calculator.half_life(spread_win)
+    hl = ev_calculator.cal_half_life(spread_win)
 
-    return p_full, p_win, beta, hl
+    return p_struct, p_win, beta, hl
 
 async def main():
     load_dotenv()
@@ -80,7 +84,7 @@ async def main():
     for cat in CRYPTO_UNIVERSES.values():
         all_symbols.update(cat)
 
-    print(f"Fetching {len(all_symbols)} unique symbols ({INTERVAL}m, 14d, {CONCURRENCY} at a time)...")
+    print(f"Fetching {len(all_symbols)} unique symbols ({INTERVAL}m, {DAYS}d, {CONCURRENCY} at a time)...")
     sem = asyncio.Semaphore(CONCURRENCY)
     results = await asyncio.gather(
         *(_fetch_symbol(api, sym, sem) for sym in all_symbols)
@@ -119,20 +123,20 @@ async def main():
             log_y = [math.log(mapy[t]) for t in common]
 
             try:
-                p_full, p_win, beta, hl = evaluate(log_x, log_y, ev_calculator)
+                p_struct, p_win, beta, hl = evaluate(log_x, log_y, ev_calculator)
             except Exception:
                 continue
 
             hl_ok = hl is not None and 0 < hl <= MAX_BARS
             # Strict 0.05 p-value threshold
-            tradeable = p_full < 0.05 and p_win < 0.05 and hl_ok
-            rows.append((x_sym, y_sym, p_full, p_win, beta, hl, tradeable, len(common), price_y, cat_name))
+            tradeable = p_struct < 0.05 and p_win < 0.05 and hl_ok
+            rows.append((x_sym, y_sym, p_struct, p_win, beta, hl, tradeable, len(common), price_y, cat_name))
 
     # Sort by p_win, then half_life
     rows.sort(key=lambda r: (r[3], r[5] if r[5] is not None else 1e9))
 
     print("\n" + "=" * 98)
-    print(f"{'category':<12}{'pair':<20}{'p_full':>9}{'p_win':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
+    print(f"{'category':<12}{'pair':<20}{'p_struct':>9}{'p_win':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
     print("=" * 98)
     for x, y, pf, pw, beta, hl, ok, n, price_y, cat in rows:
         hl_s = f"{hl:.1f}" if hl is not None else "drift"
@@ -142,7 +146,7 @@ async def main():
     winners = [r for r in rows if r[6]]
     print("\n" + "=" * 98)
     if winners:
-        print(f"{len(winners)} tradeable pair(s) (p_full<0.05 AND p_win<0.05 AND 0<half_life<={MAX_BARS} bars), no overlapping coins:")
+        print(f"{len(winners)} tradeable pair(s) (p_struct<0.05 AND p_win<0.05 AND 0<half_life<={MAX_BARS} bars), no overlapping coins:")
         used_coins = set()
         count = 1
         for x, y, pf, pw, beta, hl, ok, n, price_y, cat in winners:
