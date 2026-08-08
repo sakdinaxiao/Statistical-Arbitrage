@@ -23,7 +23,7 @@ import statsmodels.api as sm
 class PairTrading:
     def __init__(self,key,secret,symbol_list=[],qty_y=0.01):
         self.ENTRY_PERCENTILE = 95
-        self.STOPLOSS_PROPOTION = 3.0
+        self.STOPLOSS_GAP = 2.0
         self.MAX_BAR = 8
         self.TIMEFRAME = 180 # 3min
         self.DAYS = 14
@@ -85,7 +85,7 @@ class PairTrading:
                 self.dynamic_stoploss = 3.0
             else:
                 self.dynamic_entry = max(1.2, min(percentile, 3.0))
-                self.dynamic_stoploss = self.dynamic_entry * self.STOPLOSS_PROPOTION
+                self.dynamic_stoploss = min(self.dynamic_entry + self.STOPLOSS_PROPOTION,4.5)
 
         print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
         # --- DYNAMIC Z-SCORE END ---
