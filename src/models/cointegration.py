@@ -4,7 +4,7 @@ import numpy as np
 from collections import deque
 
 class Cointegrate:
-    def __init__(self,timeFrame,past_x,past_y,retest_trade_hours=2,retest_structure_hours=24):
+    def __init__(self,timeFrame,past_x,past_y,retest_trade_hours=2,retest_structure_hours=2):
         # structure = long-term relationship (14d), trade = short-term stability (8h)
         self.structure_stationary_flag = False
         self.trade_stationary_flag = False
