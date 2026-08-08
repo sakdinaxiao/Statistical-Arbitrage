@@ -18,59 +18,24 @@ from statsmodels.tsa.stattools import adfuller
 # trade as 1000x-unit contracts (SHIB1000, 1000PEPE, ...). MKR trades as SKYUSDT.
 # delisted/never-listed: TON, FET, TRU, OM.
 CRYPTO_UNIVERSES = {
-    # 1. LAYER 1 SMART CONTRACT PLATFORMS
-    # Fundamental Link: Competing for base-layer Total Value Locked (TVL),
-    # developer mindshare, and transactional gas fees.
-    "L1_COMPETITORS": [
-        "SOLUSDT",   # Solana
-        "AVAXUSDT",  # Avalanche
-        "NEARUSDT",  # Near Protocol
-        "SUIUSDT",   # Sui
-        "APTUSDT",   # Aptos
-        "SEIUSDT",   # Sei
-        "TRXUSDT",   # Tron
-        "ADAUSDT",   # Cardano
-        "DOTUSDT",   # Polkadot
-        "ATOMUSDT",  # Cosmos
+    "C1_MAJORS": [
+        "BTCUSDT", "ETHUSDT", "XRPUSDT", "TRXUSDT", "LTCUSDT", "BCHUSDT"
     ],
-
-    # 2. ETHEREUM LAYER 2 SCALING (ROLLUPS)
-    # Fundamental Link: Bound to Ethereum's underlying block space economics,
-    # data availability costs, and EVM liquidity migration.
-    "ETH_L2": [
-        "OPUSDT",    # Optimism
-        "ARBUSDT",   # Arbitrum
-        "POLUSDT",   # Polygon (formerly MATIC)
-        "STRKUSDT",  # Starknet
-        "MNTUSDT",   # Mantle
-        "ZKUSDT",    # zkSync
-        "LINEAUSDT", # Linea
+    "C2_L1": [
+        "ETHUSDT", "SOLUSDT", "ADAUSDT", "AVAXUSDT", "NEARUSDT", "DOTUSDT"
     ],
-
-    # 3. DECENTRALIZED FINANCE (DeFi) BLUECHIPS
-    # Fundamental Link: Driven by on-chain trading volume, lending interest rates,
-    # and revenue capture mechanisms.
-    "DEFI_BLUECHIPS": [
-        "UNIUSDT",   # Uniswap (DEX)
-        "AAVEUSDT",  # Aave (Lending)
-        "SKYUSDT",   # Sky (formerly Maker, CDP/Stablecoin)
-        "CRVUSDT",   # Curve (StableSwap)
-        "SNXUSDT",   # Synthetix (Derivatives)
-        "LDOUSDT",   # Lido (Liquid Staking)
-        "PENDLEUSDT",# Pendle (Yield Trading)
-        "ENAUSDT",   # Ethena (Synthetic Dollar)
-        "COMPUSDT",  # Compound (Lending)
-        "GMXUSDT",   # GMX (Perp DEX)
+    "C3_L2_BETA": [
+        "ETHUSDT", "ARBUSDT", "OPUSDT", "POLUSDT"
     ],
-
-    # 5. REAL WORLD ASSETS (RWA)
-    # Fundamental Link: Tied to traditional finance (TradFi) yields,
-    # tokenized treasuries, and institutional regulatory frameworks.
-    "RWA_TOKENIZATION": [
-        "ONDOUSDT",  # Ondo Finance
-        "CFGUSDT",   # Centrifuge
-        "POLYXUSDT", # Polymesh
+    "C4_DEFI": [
+        "ETHUSDT", "UNIUSDT", "AAVEUSDT", "LINKUSDT"
     ],
+    "C5_STABLES": [
+        "USDCUSDT", "DAIUSDT", "FDUSDUSDT"
+    ],
+    "C6_WRAPPED_LST": [
+        "BTCUSDT", "WBTCUSDT", "ETHUSDT", "STETHUSDT"
+    ]
 }
 
 WINDOW = 160        # main.py retests on 160 (8 hours)
