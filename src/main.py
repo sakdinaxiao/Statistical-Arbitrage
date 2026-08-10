@@ -27,6 +27,7 @@ class PairTrading:
         self.MAX_BAR = 8
         self.TIMEFRAME = 180 # 3min
         self.DAYS = (30*1) #1months
+        self.DANGER_ZONE_COOLDOWN = 5 # bars (15min on 3m candles) between forced danger-zone retests
 
         self.qty_y = qty_y
         self.key = key
@@ -223,6 +224,16 @@ class PairTrading:
                     self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
 
                 z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
+
+                # --- DANGER ZONE START ---
+                # flat and z near the entry line -> force a fresh stationarity test if the
+                # last one is stale, so entries never run on up-to-1h-old flags
+                if (not is_holding and z_score is not None and not np.isnan(z_score)
+                        and abs(z_score) >= self.strategy.entry * 0.85
+                        and self.cointegration.danger_counter >= self.DANGER_ZONE_COOLDOWN):
+                    print("main: z-score in danger zone with stale stationarity. Forcing retest.")
+                    self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
+                # --- DANGER ZONE END ---
 
                 #fresh half-life from the just-updated spread series drives the retest cadence
                 fresh_half_life = self.ev_calculator.cal_half_life(self.welford.get_spread_series())

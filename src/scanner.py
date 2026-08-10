@@ -42,7 +42,7 @@ WINDOW = 160        # main.py retests on 160 (8 hours)
 INTERVAL = 3       # candle minutes
 MAX_BARS = 160       # default: reject half-life slower than this
 CONCURRENCY = 8     # parallel symbol fetches
-DAYS = 3*30
+DAYS = 30
 STRUCTURE_BARS = (30*24*60)//INTERVAL  # 1 month, matches main.py max_bars_structure
 
 async def _fetch_symbol(api, sym, sem):
