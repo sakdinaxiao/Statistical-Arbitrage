@@ -14,10 +14,9 @@ class Kalman_2D:
 
         self.R = np.array([[ols_model.mse_resid]])   # measurement noise = warmup residual variance (auto-scales to log units)
         
-        # Dynamically scale Q (process noise) based on R (measurement noise)
-        # This prevents the filter from overfitting to noise and suppressing the spread variance
-        delta_alpha = self.R[0,0] * 1e-4
-        delta_beta = self.R[0,0] * 1e-5
+        #too big right now 11/8
+        delta_alpha = self.p[0,0] * 1e-5
+        delta_beta = self.p[1,1] * 1e-5
         self.Q = np.array([[delta_alpha, 0], [0, delta_beta]])
         
         #Do S*S.T = original matrix prevent negative number from rounding the precision
