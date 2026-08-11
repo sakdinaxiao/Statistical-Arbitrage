@@ -225,15 +225,6 @@ class PairTrading:
 
                 z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
 
-                # --- DANGER ZONE START ---
-                # flat and z near the entry line -> force a fresh stationarity test if the
-                # last one is stale, so entries never run on up-to-1h-old flags
-                if (not is_holding and z_score is not None and not np.isnan(z_score)
-                        and abs(z_score) >= self.strategy.entry * 0.85
-                        and self.cointegration.danger_counter >= self.DANGER_ZONE_COOLDOWN):
-                    print("main: z-score in danger zone with stale stationarity. Forcing retest.")
-                    self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
-                # --- DANGER ZONE END ---
 
                 #fresh half-life from the just-updated spread series drives the retest cadence
                 fresh_half_life = self.ev_calculator.cal_half_life(self.welford.get_spread_series())
@@ -283,6 +274,12 @@ class PairTrading:
                         signal.action = Action.HOLD
                         is_entry = False
 
+                    # force stationary test right before entry
+                    if is_entry:
+                        print("main: Forcing stationarity test before entry.")
+                        self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
+                        is_both_stat = self.cointegration.trade_stationary_flag and self.cointegration.structure_stationary_flag
+
                     #check for blocking
                     if is_entry and (not is_both_stat or is_Beta_spike):
                         print("main: Market non-stationary or beta spike. Blocking entry.")
@@ -313,7 +310,6 @@ class PairTrading:
                     #closing
                     if signal.action != Action.HOLD:                                                                              
                             await self.executor.execute_signal(signal)
-                            self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
 
                             #stoploss hit -> ban re-entry until the z-score resets
                             if signal.action == Action.EXIT_LOSS:
