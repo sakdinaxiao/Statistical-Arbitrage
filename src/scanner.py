@@ -79,10 +79,17 @@ def check_dataset_eligibility(n_common: int, expected_count: int, timeframe_name
     return True, None
 
 
-async def _fetch_symbol(api, sym, sem):
+async def _fetch_dataset(api, sym, interval, days, sem):
     async with sem:
-        # fetch extra history so the 1-month structure slice and 8h trade window are always covered
-        return sym, await api.get_past_price(sym, str(INTERVAL), days=DAYS)
+        try:
+            m = await api.get_past_price(sym, str(interval), days=days)
+            if not m:
+                print(f"  skip {sym} ({interval}m): unavailable history")
+                return sym, interval, None
+            return sym, interval, m
+        except Exception as e:
+            print(f"  skip {sym} ({interval}m): fetch error - {e}")
+            return sym, interval, None
 
 def evaluate(log_x, log_y, ev_calculator):
     def get_p_val(datax, datay):
@@ -114,26 +121,38 @@ async def main():
     api = BybitService(key, secret, testnet=False, demo=True)
 
     # Get all unique symbols across categories
-    all_symbols = set()
-    for cat in CRYPTO_UNIVERSES.values():
-        all_symbols.update(cat)
+    all_symbols = sorted(set(s for cat in CRYPTO_UNIVERSES.values() for s in cat))
 
-    print(f"Fetching {len(all_symbols)} unique symbols ({INTERVAL}m, {DAYS}d, {CONCURRENCY} at a time)...")
-    sem = asyncio.Semaphore(CONCURRENCY)
-    results = await asyncio.gather(
-        *(_fetch_symbol(api, sym, sem) for sym in all_symbols)
+    print(
+        f"Fetching {len(all_symbols)} unique symbols "
+        f"(fast: {FAST_INTERVAL}m {FAST_DAYS}d, slow: {SLOW_INTERVAL}m {SLOW_DAYS}d, "
+        f"concurrency: {CONCURRENCY})..."
     )
-    data = {}
-    for sym, m in results:
-        if m and len(m) >= WINDOW:
-            data[sym] = m
-        else:
-            print(f"  skip {sym}: insufficient data")
+    sem = asyncio.Semaphore(CONCURRENCY)
+    tasks = []
+    for sym in all_symbols:
+        tasks.append(_fetch_dataset(api, sym, FAST_INTERVAL, FAST_DAYS, sem))
+        tasks.append(_fetch_dataset(api, sym, SLOW_INTERVAL, SLOW_DAYS, sem))
 
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    fast_data = {}
+    slow_data = {}
+    for res in results:
+        if isinstance(res, Exception):
+            continue
+        sym, interval, m = res
+        if m:
+            if interval == FAST_INTERVAL or str(interval) == str(FAST_INTERVAL):
+                fast_data[sym] = m
+            elif interval == SLOW_INTERVAL or str(interval) == str(SLOW_INTERVAL):
+                slow_data[sym] = m
+
+    data = fast_data
     rows = []
     # Only test intra-category combinations
     for cat_name, coins in CRYPTO_UNIVERSES.items():
-        valid_coins = [c for c in coins if c in data]
+        valid_coins = [c for c in coins if c in fast_data and c in slow_data]
         print(f"Evaluating {cat_name} ({len(valid_coins)} valid coins)")
         for sym1, sym2 in combinations(sorted(valid_coins), 2):
             map1, map2 = data[sym1], data[sym2]
