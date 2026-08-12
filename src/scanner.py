@@ -38,12 +38,46 @@ CRYPTO_UNIVERSES = {
     ]
 }
 
-WINDOW = 160        # main.py retests on 160 (8 hours)
-INTERVAL = 3       # candle minutes
-MAX_BARS = 160       # default: reject half-life slower than this
-CONCURRENCY = 8     # parallel symbol fetches
-DAYS = 30
-STRUCTURE_BARS = (30*24*60)//INTERVAL  # 1 month, matches main.py max_bars_structure
+FAST_INTERVAL = 3
+FAST_DAYS = 30
+SLOW_INTERVAL = 60
+SLOW_DAYS = 180
+TRAIN_FRACTION = 0.70
+MAX_HALF_LIFE_BARS = 160
+FDR_ALPHA = 0.05
+RESULT_VALID_HOURS = 24
+CONCURRENCY = 8
+MIN_COVERAGE = 0.90
+
+expected_fast = FAST_DAYS * 24 * 60 // FAST_INTERVAL
+expected_slow = SLOW_DAYS * 24 * 60 // SLOW_INTERVAL
+
+# Legacy aliases for compatibility prior to full pipeline refactor
+WINDOW = MAX_HALF_LIFE_BARS
+INTERVAL = FAST_INTERVAL
+MAX_BARS = MAX_HALF_LIFE_BARS
+DAYS = FAST_DAYS
+STRUCTURE_BARS = (FAST_DAYS * 24 * 60) // FAST_INTERVAL
+
+
+def check_dataset_eligibility(n_common: int, expected_count: int, timeframe_name: str) -> tuple[bool, str | None]:
+    """
+    Checks whether an aligned X/Y timestamp intersection dataset meets coverage
+    and validation segment size requirements.
+
+    Returns (is_eligible, rejection_reason).
+    """
+    min_required = math.ceil(round(expected_count * MIN_COVERAGE, 6))
+    if n_common < min_required:
+        return False, f"insufficient {timeframe_name} history"
+
+    split = int(n_common * TRAIN_FRACTION)
+    val_len = n_common - split
+    if val_len < 21:
+        return False, f"insufficient {timeframe_name} validation sample"
+
+    return True, None
+
 
 async def _fetch_symbol(api, sym, sem):
     async with sem:
