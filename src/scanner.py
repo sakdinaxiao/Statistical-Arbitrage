@@ -245,8 +245,6 @@ def evaluate_pair(
         )
 
     hl_ok = (hl is not None and 0 < hl <= MAX_HALF_LIFE_BARS)
-    tradeable = (p_fast < FDR_ALPHA) and (p_slow < FDR_ALPHA) and hl_ok
-
     price_y = mapy_fast[latest_t_fast]
 
     return EvaluationResult(
@@ -265,8 +263,53 @@ def evaluate_pair(
         n_common_fast=len(common_fast),
         n_common_slow=len(common_slow),
         price_y=price_y,
-        tradeable=tradeable,
+        tradeable=False,
     )
+
+
+def apply_bh_correction(
+    results_list: list[EvaluationResult], alpha: float = FDR_ALPHA
+) -> tuple[float | None, float | None]:
+    """
+    Applies the Benjamini-Hochberg (BH) False Discovery Rate (FDR) procedure
+    independently to fast and slow timeframe p-values across all eligible pairs.
+
+    1. Filters eligible pairs (m = len(results_list)).
+    2. Sorts p-values for fast and slow timeframes independently.
+    3. Finds largest index k such that p_k <= (k/m) * alpha.
+    4. Sets tradeable=True for pairs meeting BH thresholds in BOTH timeframes
+       and having valid half-life (0 < hl <= MAX_HALF_LIFE_BARS).
+
+    Returns (cutoff_fast, cutoff_slow).
+    """
+    m = len(results_list)
+    if m == 0:
+        return None, None
+
+    fast_pvals = sorted(
+        r.p_fast for r in results_list if r.p_fast is not None and math.isfinite(r.p_fast)
+    )
+    slow_pvals = sorted(
+        r.p_slow for r in results_list if r.p_slow is not None and math.isfinite(r.p_slow)
+    )
+
+    cutoff_fast = None
+    for i, p in enumerate(fast_pvals, start=1):
+        if p <= (i / m) * alpha:
+            cutoff_fast = p
+
+    cutoff_slow = None
+    for i, p in enumerate(slow_pvals, start=1):
+        if p <= (i / m) * alpha:
+            cutoff_slow = p
+
+    for r in results_list:
+        pass_fast = (cutoff_fast is not None) and (r.p_fast is not None) and (r.p_fast <= cutoff_fast)
+        pass_slow = (cutoff_slow is not None) and (r.p_slow is not None) and (r.p_slow <= cutoff_slow)
+        hl_ok = (r.half_life is not None) and (0 < r.half_life <= MAX_HALF_LIFE_BARS)
+        r.tradeable = pass_fast and pass_slow and hl_ok
+
+    return cutoff_fast, cutoff_slow
 
 
 async def main():
@@ -345,33 +388,39 @@ async def main():
             reason = r.rejection_reason if r.rejection_reason else "ineligible dataset"
             print(f"  skip {r.x_sym}/{r.y_sym} ({r.category}): {reason}")
 
-    # Sort by p_fast, then half_life
-    results_list.sort(
+    # Apply Benjamini-Hochberg FDR correction across all eligible pairs
+    cutoff_fast, cutoff_slow = apply_bh_correction(results_list, FDR_ALPHA)
+
+    winners = [r for r in results_list if r.tradeable]
+    winners.sort(
         key=lambda r: (
             r.p_fast if r.p_fast is not None else 1.0,
             r.half_life if r.half_life is not None else 1e9,
         )
     )
 
-    cat_width = max([len(r.category) for r in results_list] + [len("category"), 12]) if results_list else 28
-    table_width = cat_width + 72
+    if winners:
+        cat_width = max([len(r.category) for r in winners] + [len("category"), 12])
+        table_width = cat_width + 72
 
-    print("\n" + "=" * table_width)
-    print(f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
-    print("=" * table_width)
-    for r in results_list:
-        hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
-        flag = "  YES" if r.tradeable else ""
+        print("\n" + "=" * table_width)
         print(
-            f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
-            f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}{flag}"
+            f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade"
         )
+        print("=" * table_width)
+        for r in winners:
+            hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
+            print(
+                f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
+                f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}  YES"
+            )
+    else:
+        print("\nNo pair currently clears all three gates (fast BH, slow BH, half-life).")
 
-    winners = [r for r in results_list if r.tradeable]
     print("\n" + "=" * 98)
     if winners:
         print(
-            f"{len(winners)} tradeable pair(s) (p_slow<0.05 AND p_fast<0.05 AND "
+            f"{len(winners)} tradeable pair(s) passing all 3 gates (fast BH, slow BH, "
             f"0<half_life<={MAX_HALF_LIFE_BARS} bars), no overlapping coins:"
         )
         used_coins = set()
@@ -383,11 +432,11 @@ async def main():
             used_coins.add(r.y_sym)
             print(
                 f"  Bot {count} ({r.category}): coinlist = [\"{r.x_sym}\", \"{r.y_sym}\"]   "
-                f"# p_fast={r.p_fast:.4f}, half_life={r.half_life:.1f} bars, price_y=${r.price_y:.3f}"
+                f"# p_fast={r.p_fast:.4f}, p_slow={r.p_slow:.4f}, half_life={r.half_life:.1f} bars, price_y=${r.price_y:.3f}"
             )
             count += 1
     else:
-        print("No pair currently clears both gates.")
+        print("No pair currently clears all three gates.")
 
 
 if __name__ == "__main__":
