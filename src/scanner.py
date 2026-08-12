@@ -2,7 +2,7 @@ import asyncio
 import math
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
 
 import numpy as np
@@ -79,6 +79,7 @@ class EvaluationResult:
     n_common_slow: int = 0
     price_y: float = 0.0
     tradeable: bool = False
+    categories: list[str] = field(default_factory=list)
 
 
 def check_dataset_eligibility(n_common: int, expected_count: int, timeframe_name: str) -> tuple[bool, str | None]:
@@ -166,23 +167,34 @@ def evaluate_pair(
     map2_fast: dict,
     map1_slow: dict,
     map2_slow: dict,
-    category: str,
+    category: str | list[str],
     ev_calculator: ExpectedValueCalculator,
 ) -> EvaluationResult:
     """
     Evaluates cointegration and trading eligibility for a pair of coins across fast
     and slow timeframes.
     """
+    if isinstance(category, list):
+        categories = list(category)
+        cat_str = ", ".join(categories)
+    else:
+        cat_str = str(category)
+        categories = [c.strip() for c in cat_str.split(",") if c.strip()]
+
     common_fast = sorted(set(map1_fast) & set(map2_fast))
     common_slow = sorted(set(map1_slow) & set(map2_slow))
 
     ok_fast, reason_fast = check_dataset_eligibility(len(common_fast), expected_fast, "fast")
     if not ok_fast:
-        return EvaluationResult(x_sym=sym1, y_sym=sym2, category=category, is_eligible=False, rejection_reason=reason_fast)
+        return EvaluationResult(
+            x_sym=sym1, y_sym=sym2, category=cat_str, categories=categories, is_eligible=False, rejection_reason=reason_fast
+        )
 
     ok_slow, reason_slow = check_dataset_eligibility(len(common_slow), expected_slow, "slow")
     if not ok_slow:
-        return EvaluationResult(x_sym=sym1, y_sym=sym2, category=category, is_eligible=False, rejection_reason=reason_slow)
+        return EvaluationResult(
+            x_sym=sym1, y_sym=sym2, category=cat_str, categories=categories, is_eligible=False, rejection_reason=reason_slow
+        )
 
     # Force Y to be the expensive coin based on latest common fast timestamp
     latest_t_fast = common_fast[-1]
@@ -191,7 +203,7 @@ def evaluate_pair(
 
     if p1 is None or p2 is None or not math.isfinite(p1) or not math.isfinite(p2) or p1 <= 0 or p2 <= 0:
         return EvaluationResult(
-            x_sym=sym1, y_sym=sym2, category=category, is_eligible=False, rejection_reason="non-positive or non-finite price"
+            x_sym=sym1, y_sym=sym2, category=cat_str, categories=categories, is_eligible=False, rejection_reason="non-positive or non-finite price"
         )
 
     if p1 > p2:
@@ -208,14 +220,14 @@ def evaluate_pair(
         px, py = mapx_fast[t], mapy_fast[t]
         if px is None or py is None or not math.isfinite(px) or not math.isfinite(py) or px <= 0 or py <= 0:
             return EvaluationResult(
-                x_sym=x_sym, y_sym=y_sym, category=category, is_eligible=False, rejection_reason="non-positive or non-finite price in fast data"
+                x_sym=x_sym, y_sym=y_sym, category=cat_str, categories=categories, is_eligible=False, rejection_reason="non-positive or non-finite price in fast data"
             )
 
     for t in common_slow:
         px, py = mapx_slow[t], mapy_slow[t]
         if px is None or py is None or not math.isfinite(px) or not math.isfinite(py) or px <= 0 or py <= 0:
             return EvaluationResult(
-                x_sym=x_sym, y_sym=y_sym, category=category, is_eligible=False, rejection_reason="non-positive or non-finite price in slow data"
+                x_sym=x_sym, y_sym=y_sym, category=cat_str, categories=categories, is_eligible=False, rejection_reason="non-positive or non-finite price in slow data"
             )
 
     log_x_fast = [math.log(mapx_fast[t]) for t in common_fast]
@@ -226,12 +238,12 @@ def evaluate_pair(
     try:
         p_fast, alpha_fast, beta_fast, val_spread_fast = validate_split(log_x_fast, log_y_fast)
         p_slow, alpha_slow, beta_slow, val_spread_slow = validate_split(log_x_slow, log_y_slow)
+        hl = ev_calculator.cal_half_life(val_spread_fast)
     except Exception as e:
         return EvaluationResult(
-            x_sym=x_sym, y_sym=y_sym, category=category, is_eligible=False, rejection_reason=f"validation/ADF fit error: {e}"
+            x_sym=x_sym, y_sym=y_sym, category=cat_str, categories=categories, is_eligible=False, rejection_reason=f"validation/ADF fit error: {e}"
         )
 
-    hl = ev_calculator.cal_half_life(val_spread_fast)
     hl_ok = (hl is not None and 0 < hl <= MAX_HALF_LIFE_BARS)
     tradeable = (p_fast < FDR_ALPHA) and (p_slow < FDR_ALPHA) and hl_ok
 
@@ -240,7 +252,8 @@ def evaluate_pair(
     return EvaluationResult(
         x_sym=x_sym,
         y_sym=y_sym,
-        category=category,
+        category=cat_str,
+        categories=categories,
         is_eligible=True,
         p_fast=p_fast,
         p_slow=p_slow,
@@ -293,12 +306,21 @@ async def main():
             elif interval == SLOW_INTERVAL or str(interval) == str(SLOW_INTERVAL):
                 slow_data[sym] = m
 
-    results_list = []
-    # Only test intra-category combinations
+    # Build unique pair canonical keys and map all associated categories
+    pair_categories: dict[tuple[str, str], list[str]] = {}
     for cat_name, coins in CRYPTO_UNIVERSES.items():
         valid_coins = [c for c in coins if c in fast_data and c in slow_data]
-        print(f"Evaluating {cat_name} ({len(valid_coins)} valid coins)")
         for sym1, sym2 in combinations(sorted(valid_coins), 2):
+            pair_key = tuple(sorted((sym1, sym2)))
+            if pair_key not in pair_categories:
+                pair_categories[pair_key] = []
+            if cat_name not in pair_categories[pair_key]:
+                pair_categories[pair_key].append(cat_name)
+
+    print(f"Evaluating {len(pair_categories)} unique intra-category pairs...")
+    results_list = []
+    for (sym1, sym2), cat_list in pair_categories.items():
+        try:
             res = evaluate_pair(
                 sym1,
                 sym2,
@@ -306,11 +328,13 @@ async def main():
                 fast_data[sym2],
                 slow_data[sym1],
                 slow_data[sym2],
-                cat_name,
+                cat_list,
                 ev_calculator,
             )
             if res.is_eligible:
                 results_list.append(res)
+        except Exception as e:
+            print(f"scanner: error evaluating pair {sym1}/{sym2}: {e}")
 
     # Sort by p_fast, then half_life
     results_list.sort(
@@ -320,14 +344,14 @@ async def main():
         )
     )
 
-    print("\n" + "=" * 98)
-    print(f"{'category':<12}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
-    print("=" * 98)
+    print("\n" + "=" * 100)
+    print(f"{'category':<28}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
+    print("=" * 100)
     for r in results_list:
         hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
         flag = "  YES" if r.tradeable else ""
         print(
-            f"{r.category:<12}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
+            f"{r.category:<28}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
             f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}{flag}"
         )
 
