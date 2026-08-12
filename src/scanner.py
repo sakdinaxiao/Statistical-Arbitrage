@@ -319,6 +319,7 @@ async def main():
 
     print(f"Evaluating {len(pair_categories)} unique intra-category pairs...")
     results_list = []
+    ineligible_list = []
     for (sym1, sym2), cat_list in pair_categories.items():
         try:
             res = evaluate_pair(
@@ -333,8 +334,16 @@ async def main():
             )
             if res.is_eligible:
                 results_list.append(res)
+            else:
+                ineligible_list.append(res)
         except Exception as e:
             print(f"scanner: error evaluating pair {sym1}/{sym2}: {e}")
+
+    if ineligible_list:
+        print(f"\nIneligible pair(s) skipped ({len(ineligible_list)} total):")
+        for r in ineligible_list:
+            reason = r.rejection_reason if r.rejection_reason else "ineligible dataset"
+            print(f"  skip {r.x_sym}/{r.y_sym} ({r.category}): {reason}")
 
     # Sort by p_fast, then half_life
     results_list.sort(
@@ -344,14 +353,17 @@ async def main():
         )
     )
 
-    print("\n" + "=" * 100)
-    print(f"{'category':<28}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
-    print("=" * 100)
+    cat_width = max([len(r.category) for r in results_list] + [len("category"), 12]) if results_list else 28
+    table_width = cat_width + 72
+
+    print("\n" + "=" * table_width)
+    print(f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
+    print("=" * table_width)
     for r in results_list:
         hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
         flag = "  YES" if r.tradeable else ""
         print(
-            f"{r.category:<28}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
+            f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
             f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}{flag}"
         )
 
