@@ -1,9 +1,10 @@
 import numpy as np
 import statsmodels.api as sm
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
 
 class Kalman_2D:
-    def __init__(self,initx,inity):
+    def __init__(self,initx,inity,q_frac=1e-3):
         ols_model = sm.OLS(inity,sm.add_constant(initx)).fit()
 
         self.alpha = ols_model.params[0]
@@ -14,9 +15,8 @@ class Kalman_2D:
 
         self.R = np.array([[ols_model.mse_resid]])   # measurement noise = warmup residual variance (auto-scales to log units)
         
-        #too big right now 11/8
-        delta_alpha = self.p[0,0] * 1e-5
-        delta_beta = self.p[1,1] * 1e-5
+        delta_alpha = self.p[0,0] * q_frac
+        delta_beta = self.p[1,1] * q_frac
         self.Q = np.array([[delta_alpha, 0], [0, delta_beta]])
         
         #Do S*S.T = original matrix prevent negative number from rounding the precision
@@ -26,6 +26,30 @@ class Kalman_2D:
         self.s_R = np.linalg.cholesky(self.R)
         
         self.I = np.eye(2)
+
+
+    @classmethod
+    def tune_q_frac(cls,logx,logy,warmup_len):
+        candidates = [1e-5, 1e-4, 3e-4, 1e-3, 3e-3]
+        results = []
+
+        for q_frac in candidates:
+            kalman = cls(logx[:warmup_len],logy[:warmup_len],q_frac=q_frac)
+            ets = []
+            betas = []
+
+            for x,y in zip(logx[warmup_len:],logy[warmup_len:]):
+                _, beta, et = kalman.update(x,y)
+                ets.append(et)
+                betas.append(beta)
+
+            ljung_box = acorr_ljungbox(ets,lags=[20],return_df=True)
+            p_value = float(ljung_box["lb_pvalue"].iloc[0])
+            results.append((q_frac,p_value))
+
+        passing = [result for result in results if result[1] > 0.05]
+        selected = passing[0] if passing else max(results,key=lambda result: result[1])
+        return selected
 
 
     def update(self,x,y):

@@ -140,8 +140,10 @@ class PairTrading:
         #kalman spreaed z_score 
         initx=self.past_log_x[-self.window:]
         inity=self.past_log_y[-self.window:]
-        
-        self.kalman = Kalman_2D(initx,inity)
+
+        optimal_q, q_p_value = Kalman_2D.tune_q_frac(self.past_log_x,self.past_log_y,self.window)
+        print(f"main: selected Kalman q_frac: {optimal_q:g}, Ljung-Box p-value: {q_p_value:.6f}")
+        self.kalman = Kalman_2D(initx,inity,q_frac=optimal_q)
 
         self.welford = WelfordZScore(self.window,initx,inity,self.kalman.alpha,self.kalman.beta)
 
