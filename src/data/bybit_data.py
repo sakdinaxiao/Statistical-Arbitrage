@@ -1,7 +1,7 @@
+import asyncio
+from datetime import datetime, timedelta
 from pybit.unified_trading import HTTP
 from pybit.exceptions import FailedRequestError, InvalidRequestError
-from datetime import datetime, timedelta
-import time 
 from data.enums import State
 
 class BybitService:
@@ -68,7 +68,8 @@ class BybitService:
             all_candles = []
 
             while endtime > starttime:
-                response = self.session.get_kline(
+                response = await asyncio.to_thread(
+                    self.session.get_kline,
                     category="linear",
                     symbol=symbol,
                     interval=str(time_frame),
@@ -77,7 +78,11 @@ class BybitService:
                     end=endtime
                 )
 
-                candles = response.get("result").get("list")
+                if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
+                    print(f"api: malformed response for {symbol}: {response}")
+                    return None
+
+                candles = response.get("result", {}).get("list")
 
                 if not candles: break
 
@@ -86,7 +91,7 @@ class BybitService:
                 old_candle = int(candles[-1][0])
                 endtime = old_candle -1
 
-                time.sleep(0.1)
+                await asyncio.sleep(0.1)
 
             candle_map = {int(candle[0]): float(candle[4]) for candle in all_candles}
             number = len(candle_map)
