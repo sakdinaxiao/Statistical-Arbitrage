@@ -2,6 +2,7 @@ import asyncio
 import math
 import os
 import sys
+from dataclasses import dataclass
 from itertools import combinations
 
 import numpy as np
@@ -60,6 +61,26 @@ DAYS = FAST_DAYS
 STRUCTURE_BARS = (FAST_DAYS * 24 * 60) // FAST_INTERVAL
 
 
+@dataclass
+class EvaluationResult:
+    x_sym: str
+    y_sym: str
+    category: str
+    is_eligible: bool
+    rejection_reason: str | None = None
+    p_fast: float | None = None
+    p_slow: float | None = None
+    beta_fast: float | None = None
+    beta_slow: float | None = None
+    alpha_fast: float | None = None
+    alpha_slow: float | None = None
+    half_life: float | None = None
+    n_common_fast: int = 0
+    n_common_slow: int = 0
+    price_y: float = 0.0
+    tradeable: bool = False
+
+
 def check_dataset_eligibility(n_common: int, expected_count: int, timeframe_name: str) -> tuple[bool, str | None]:
     """
     Checks whether an aligned X/Y timestamp intersection dataset meets coverage
@@ -91,25 +112,149 @@ async def _fetch_dataset(api, sym, interval, days, sem):
             print(f"  skip {sym} ({interval}m): fetch error - {e}")
             return sym, interval, None
 
-def evaluate(log_x, log_y, ev_calculator):
-    def get_p_val(datax, datay):
-        ols_model = sm.OLS(datay, sm.add_constant(datax)).fit()
-        alpha = ols_model.params[0]
-        beta = ols_model.params[1]
-        spread = np.array(datay) - ((beta * np.array(datax)) + alpha)
-        return adfuller(spread)[1], beta, spread
 
-    struct_x = log_x[-STRUCTURE_BARS:]
-    struct_y = log_y[-STRUCTURE_BARS:]
-    p_struct, _, _ = get_p_val(struct_x, struct_y)
+def validate_split(log_x, log_y):
+    """
+    Fits OLS on the first TRAIN_FRACTION (70%) of log prices, then evaluates
+    stationarity of the resulting spread on the remaining (30%) validation slice.
 
-    win_x = log_x[-WINDOW:]
-    win_y = log_y[-WINDOW:]
-    p_win, beta, spread_win = get_p_val(win_x, win_y)
+    Returns (p_value, alpha, beta, validation_spread).
+    """
+    x = np.asarray(log_x, dtype=float)
+    y = np.asarray(log_y, dtype=float)
 
-    hl = ev_calculator.cal_half_life(spread_win)
+    if x.ndim != 1 or y.ndim != 1:
+        raise ValueError("log_x and log_y must be 1-dimensional")
+    if len(x) != len(y):
+        raise ValueError("log_x and log_y must have equal lengths")
+    if len(x) == 0:
+        raise ValueError("log_x and log_y cannot be empty")
+    if not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
+        raise ValueError("log_x and log_y must contain only finite float values")
 
-    return p_struct, p_win, beta, hl
+    split = int(len(x) * TRAIN_FRACTION)
+    if split < 2 or (len(x) - split) < 2:
+        raise ValueError("Insufficient sample size for split validation")
+
+    x_train = x[:split]
+    y_train = y[:split]
+
+    ols_model = sm.OLS(y_train, sm.add_constant(x_train)).fit()
+    alpha = float(ols_model.params[0])
+    beta = float(ols_model.params[1])
+
+    if not np.isfinite(alpha) or not np.isfinite(beta):
+        raise ValueError("OLS fit produced non-finite parameters")
+
+    x_val = x[split:]
+    y_val = y[split:]
+    validation_spread = y_val - (beta * x_val + alpha)
+
+    if not np.all(np.isfinite(validation_spread)):
+        raise ValueError("Validation spread contains non-finite values")
+
+    adf_res = adfuller(validation_spread)
+    p_value = float(adf_res[1])
+
+    return p_value, alpha, beta, validation_spread
+
+
+def evaluate_pair(
+    sym1: str,
+    sym2: str,
+    map1_fast: dict,
+    map2_fast: dict,
+    map1_slow: dict,
+    map2_slow: dict,
+    category: str,
+    ev_calculator: ExpectedValueCalculator,
+) -> EvaluationResult:
+    """
+    Evaluates cointegration and trading eligibility for a pair of coins across fast
+    and slow timeframes.
+    """
+    common_fast = sorted(set(map1_fast) & set(map2_fast))
+    common_slow = sorted(set(map1_slow) & set(map2_slow))
+
+    ok_fast, reason_fast = check_dataset_eligibility(len(common_fast), expected_fast, "fast")
+    if not ok_fast:
+        return EvaluationResult(x_sym=sym1, y_sym=sym2, category=category, is_eligible=False, rejection_reason=reason_fast)
+
+    ok_slow, reason_slow = check_dataset_eligibility(len(common_slow), expected_slow, "slow")
+    if not ok_slow:
+        return EvaluationResult(x_sym=sym1, y_sym=sym2, category=category, is_eligible=False, rejection_reason=reason_slow)
+
+    # Force Y to be the expensive coin based on latest common fast timestamp
+    latest_t_fast = common_fast[-1]
+    p1 = map1_fast[latest_t_fast]
+    p2 = map2_fast[latest_t_fast]
+
+    if p1 is None or p2 is None or not math.isfinite(p1) or not math.isfinite(p2) or p1 <= 0 or p2 <= 0:
+        return EvaluationResult(
+            x_sym=sym1, y_sym=sym2, category=category, is_eligible=False, rejection_reason="non-positive or non-finite price"
+        )
+
+    if p1 > p2:
+        x_sym, y_sym = sym2, sym1
+        mapx_fast, mapy_fast = map2_fast, map1_fast
+        mapx_slow, mapy_slow = map2_slow, map1_slow
+    else:
+        x_sym, y_sym = sym1, sym2
+        mapx_fast, mapy_fast = map1_fast, map2_fast
+        mapx_slow, mapy_slow = map1_slow, map2_slow
+
+    # Validate price positivity and finiteness across all timestamps
+    for t in common_fast:
+        px, py = mapx_fast[t], mapy_fast[t]
+        if px is None or py is None or not math.isfinite(px) or not math.isfinite(py) or px <= 0 or py <= 0:
+            return EvaluationResult(
+                x_sym=x_sym, y_sym=y_sym, category=category, is_eligible=False, rejection_reason="non-positive or non-finite price in fast data"
+            )
+
+    for t in common_slow:
+        px, py = mapx_slow[t], mapy_slow[t]
+        if px is None or py is None or not math.isfinite(px) or not math.isfinite(py) or px <= 0 or py <= 0:
+            return EvaluationResult(
+                x_sym=x_sym, y_sym=y_sym, category=category, is_eligible=False, rejection_reason="non-positive or non-finite price in slow data"
+            )
+
+    log_x_fast = [math.log(mapx_fast[t]) for t in common_fast]
+    log_y_fast = [math.log(mapy_fast[t]) for t in common_fast]
+    log_x_slow = [math.log(mapx_slow[t]) for t in common_slow]
+    log_y_slow = [math.log(mapy_slow[t]) for t in common_slow]
+
+    try:
+        p_fast, alpha_fast, beta_fast, val_spread_fast = validate_split(log_x_fast, log_y_fast)
+        p_slow, alpha_slow, beta_slow, val_spread_slow = validate_split(log_x_slow, log_y_slow)
+    except Exception as e:
+        return EvaluationResult(
+            x_sym=x_sym, y_sym=y_sym, category=category, is_eligible=False, rejection_reason=f"validation/ADF fit error: {e}"
+        )
+
+    hl = ev_calculator.cal_half_life(val_spread_fast)
+    hl_ok = (hl is not None and 0 < hl <= MAX_HALF_LIFE_BARS)
+    tradeable = (p_fast < FDR_ALPHA) and (p_slow < FDR_ALPHA) and hl_ok
+
+    price_y = mapy_fast[latest_t_fast]
+
+    return EvaluationResult(
+        x_sym=x_sym,
+        y_sym=y_sym,
+        category=category,
+        is_eligible=True,
+        p_fast=p_fast,
+        p_slow=p_slow,
+        beta_fast=beta_fast,
+        beta_slow=beta_slow,
+        alpha_fast=alpha_fast,
+        alpha_slow=alpha_slow,
+        half_life=hl,
+        n_common_fast=len(common_fast),
+        n_common_slow=len(common_slow),
+        price_y=price_y,
+        tradeable=tradeable,
+    )
+
 
 async def main():
     load_dotenv()
@@ -148,69 +293,67 @@ async def main():
             elif interval == SLOW_INTERVAL or str(interval) == str(SLOW_INTERVAL):
                 slow_data[sym] = m
 
-    data = fast_data
-    rows = []
+    results_list = []
     # Only test intra-category combinations
     for cat_name, coins in CRYPTO_UNIVERSES.items():
         valid_coins = [c for c in coins if c in fast_data and c in slow_data]
         print(f"Evaluating {cat_name} ({len(valid_coins)} valid coins)")
         for sym1, sym2 in combinations(sorted(valid_coins), 2):
-            map1, map2 = data[sym1], data[sym2]
-            common = sorted(set(map1) & set(map2))
-            if len(common) < WINDOW:
-                continue
+            res = evaluate_pair(
+                sym1,
+                sym2,
+                fast_data[sym1],
+                fast_data[sym2],
+                slow_data[sym1],
+                slow_data[sym2],
+                cat_name,
+                ev_calculator,
+            )
+            if res.is_eligible:
+                results_list.append(res)
 
-            # Force Y to be the expensive coin
-            price1 = map1[common[-1]]
-            price2 = map2[common[-1]]
-            if price1 > price2:
-                x_sym, y_sym = sym2, sym1
-                mapx, mapy = map2, map1
-                price_y = price1
-            else:
-                x_sym, y_sym = sym1, sym2
-                mapx, mapy = map1, map2
-                price_y = price2
-
-            log_x = [math.log(mapx[t]) for t in common]
-            log_y = [math.log(mapy[t]) for t in common]
-
-            try:
-                p_struct, p_win, beta, hl = evaluate(log_x, log_y, ev_calculator)
-            except Exception:
-                continue
-
-            hl_ok = hl is not None and 0 < hl <= MAX_BARS
-            # Strict 0.05 p-value threshold
-            tradeable = p_struct < 0.05 and p_win < 0.05 and hl_ok
-            rows.append((x_sym, y_sym, p_struct, p_win, beta, hl, tradeable, len(common), price_y, cat_name))
-
-    # Sort by p_win, then half_life
-    rows.sort(key=lambda r: (r[3], r[5] if r[5] is not None else 1e9))
+    # Sort by p_fast, then half_life
+    results_list.sort(
+        key=lambda r: (
+            r.p_fast if r.p_fast is not None else 1.0,
+            r.half_life if r.half_life is not None else 1e9,
+        )
+    )
 
     print("\n" + "=" * 98)
-    print(f"{'category':<12}{'pair':<20}{'p_struct':>9}{'p_win':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
+    print(f"{'category':<12}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade")
     print("=" * 98)
-    for x, y, pf, pw, beta, hl, ok, n, price_y, cat in rows:
-        hl_s = f"{hl:.1f}" if hl is not None else "drift"
-        flag = "  YES" if ok else ""
-        print(f"{cat:<12}{x+'/'+y:<20}{pf:>9.4f}{pw:>9.4f}{beta:>9.3f}{hl_s:>11}{n:>7}{flag}")
+    for r in results_list:
+        hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
+        flag = "  YES" if r.tradeable else ""
+        print(
+            f"{r.category:<12}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
+            f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}{flag}"
+        )
 
-    winners = [r for r in rows if r[6]]
+    winners = [r for r in results_list if r.tradeable]
     print("\n" + "=" * 98)
     if winners:
-        print(f"{len(winners)} tradeable pair(s) (p_struct<0.05 AND p_win<0.05 AND 0<half_life<={MAX_BARS} bars), no overlapping coins:")
+        print(
+            f"{len(winners)} tradeable pair(s) (p_slow<0.05 AND p_fast<0.05 AND "
+            f"0<half_life<={MAX_HALF_LIFE_BARS} bars), no overlapping coins:"
+        )
         used_coins = set()
         count = 1
-        for x, y, pf, pw, beta, hl, ok, n, price_y, cat in winners:
-            if x in used_coins or y in used_coins:
+        for r in winners:
+            if r.x_sym in used_coins or r.y_sym in used_coins:
                 continue
-            used_coins.add(x)
-            used_coins.add(y)
-            print(f"  Bot {count} ({cat}): coinlist = [\"{x}\", \"{y}\"]   # p_win={pw:.4f}, half_life={hl:.1f} bars, price_y=${price_y:.3f}")
+            used_coins.add(r.x_sym)
+            used_coins.add(r.y_sym)
+            print(
+                f"  Bot {count} ({r.category}): coinlist = [\"{r.x_sym}\", \"{r.y_sym}\"]   "
+                f"# p_fast={r.p_fast:.4f}, half_life={r.half_life:.1f} bars, price_y=${r.price_y:.3f}"
+            )
             count += 1
     else:
         print("No pair currently clears both gates.")
 
+
 if __name__ == "__main__":
     asyncio.run(main())
+
