@@ -42,7 +42,6 @@ class PairTrading:
         self.needs_reset = False # stoploss cooldown: bans re-entry until z-score cools off
         
         self.max_bars = int((self.MAX_BAR*60) / (self.TIMEFRAME/60)) #8 hours
-        self.max_bars_structure = int((self.DAYS*24*60) / (self.TIMEFRAME/60)) #1 month
     
         if len(self.symbol_list) != 2:
             print("main: symbol missing")
@@ -128,11 +127,10 @@ class PairTrading:
 
         print(f"main: successfully prepared {len(common_times)} log prices")
 
-        #stationary 
+        # test the short-term 8h stationarity window
         self.cointegration = Cointegrate(self.TIMEFRAME, self.past_log_x, self.past_log_y)
-        self.cointegration.structure_stationary_flag = self.cointegration.spread_stationaryTest(self.past_log_x,self.past_log_y)    
         self.cointegration.trade_stationary_flag = self.cointegration.spread_stationaryTest(self.past_log_x[-self.max_bars:], self.past_log_y[-self.max_bars:])
-        if self.cointegration.structure_stationary_flag is False or self.cointegration.trade_stationary_flag is False:
+        if self.cointegration.trade_stationary_flag is False:
             print("main: stationary flag is False. Stopping the machine.")
             sys.exit(1)
 
@@ -223,7 +221,7 @@ class PairTrading:
 
                 if is_Beta_spike:
                     print("main: beta spike detected. Retesting stationary and skipping entries.")
-                    self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
+                    self.cointegration.force_retest(self.max_bars)
 
                 z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
 
@@ -232,18 +230,14 @@ class PairTrading:
                 fresh_half_life = self.ev_calculator.cal_half_life(self.welford.get_spread_series())
 
                 #update staionary list (dynamic cadence: 1h flat, 3 * half-life while holding)
-                self.cointegration.update(logPrice_x, logPrice_y, self.max_bars, self.max_bars_structure, is_holding=is_holding, half_life_bars=fresh_half_life)
+                self.cointegration.update(logPrice_x, logPrice_y, self.max_bars, is_holding=is_holding, half_life_bars=fresh_half_life)
 
                 #check for stationary while trading
-                is_both_stat = self.cointegration.trade_stationary_flag and self.cointegration.structure_stationary_flag
-                if not is_both_stat:
+                is_trade_stat = self.cointegration.trade_stationary_flag
+                if not is_trade_stat:
                     print("main: it's not stationary. Skipping entries.")
 
-                #tighening stoploss only on long-term (structure) failure; short-term failure just blocks new entries
-                if is_holding and not self.cointegration.structure_stationary_flag:
-                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0) / 2.0
-                else:
-                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
+                self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
 
                 # --- RESET RULE START ---
                 # stoploss cooldown lifts only when z cools below half the entry line
@@ -279,11 +273,11 @@ class PairTrading:
                     # force stationary test right before entry
                     if is_entry:
                         print("main: Forcing stationarity test before entry.")
-                        self.cointegration.force_retest(self.max_bars, self.max_bars_structure)
-                        is_both_stat = self.cointegration.trade_stationary_flag and self.cointegration.structure_stationary_flag
+                        self.cointegration.force_retest(self.max_bars)
+                        is_trade_stat = self.cointegration.trade_stationary_flag
 
                     #check for blocking
-                    if is_entry and (not is_both_stat or is_Beta_spike):
+                    if is_entry and (not is_trade_stat or is_Beta_spike):
                         print("main: Market non-stationary or beta spike. Blocking entry.")
 
                         # --- LOGGER WIRE START ---
@@ -321,7 +315,6 @@ class PairTrading:
                 # --- DASHBOARD UPDATE START ---
                 try:
                     is_trade_stat = getattr(self, 'cointegration', None) and self.cointegration.trade_stationary_flag
-                    is_structure_stat = getattr(self, 'cointegration', None) and self.cointegration.structure_stationary_flag
                     pair_str = f"{self.coin_x} / {self.coin_y}"
                     
                     current_ev = None
@@ -341,7 +334,6 @@ class PairTrading:
                         z_score, 
                         beta, 
                         is_trade_stat,
-                        is_structure_stat, 
                         pair_str, 
                         raw_x, 
                         raw_y, 

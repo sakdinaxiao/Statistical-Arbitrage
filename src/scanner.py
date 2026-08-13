@@ -36,6 +36,15 @@ CRYPTO_UNIVERSES = {
     ],
     "C6_WRAPPED_LST": [
         "BTCUSDT", "WBTCUSDT", "ETHUSDT", "STETHUSDT"
+    ],
+    "C7_AI": [
+        "FETUSDT", "RNDRUSDT", "TAOUSDT"
+    ],
+    "C8_GAMING": [
+        "IMXUSDT", "GALAUSDT", "SANDUSDT", "MANAUSDT"
+    ],
+    "C9_MEMES": [
+        "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "WIFUSDT", "BONKUSDT"
     ]
 }
 
@@ -416,6 +425,27 @@ async def main():
             )
     else:
         print("\nNo pair currently clears all three gates (fast BH, slow BH, half-life).")
+        
+        # Display the 4 "best" pairs that failed the gates
+        best_losers = [r for r in results_list if r.is_eligible and r.p_fast is not None and r.p_slow is not None]
+        best_losers.sort(key=lambda r: (r.p_slow, r.p_fast))
+        top_4 = best_losers[:4]
+        
+        if top_4:
+            cat_width = max([len(r.category) for r in top_4] + [len("category"), 12])
+            table_width = cat_width + 72
+            print(f"\nHowever, here are the top {len(top_4)} closest pairs (ranked by lowest p_slow):")
+            print("=" * table_width)
+            print(
+                f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}"
+            )
+            print("=" * table_width)
+            for r in top_4:
+                hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
+                print(
+                    f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
+                    f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}"
+                )
 
     print("\n" + "=" * 98)
     if winners:
