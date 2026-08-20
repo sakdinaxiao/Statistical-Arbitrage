@@ -54,7 +54,8 @@ SLOW_INTERVAL = 60
 SLOW_DAYS = 180
 TRAIN_FRACTION = 0.70
 MAX_HALF_LIFE_BARS = 160
-FDR_ALPHA = 0.05
+TRADEABLE_FDR_ALPHA = 0.05
+CANDIDATE_FDR_ALPHA = 0.10
 RESULT_VALID_HOURS = 24
 CONCURRENCY = 8
 MIN_COVERAGE = 0.90
@@ -79,6 +80,8 @@ class EvaluationResult:
     rejection_reason: str | None = None
     p_fast: float | None = None
     p_slow: float | None = None
+    p_joint: float | None = None
+    p_joint_adj: float | None = None
     beta_fast: float | None = None
     beta_slow: float | None = None
     alpha_fast: float | None = None
@@ -88,6 +91,7 @@ class EvaluationResult:
     n_common_slow: int = 0
     price_y: float = 0.0
     tradeable: bool = False
+    candidate: bool = False
     categories: list[str] = field(default_factory=list)
 
 
@@ -247,13 +251,19 @@ def evaluate_pair(
     try:
         p_fast, alpha_fast, beta_fast, val_spread_fast = validate_split(log_x_fast, log_y_fast)
         p_slow, alpha_slow, beta_slow, val_spread_slow = validate_split(log_x_slow, log_y_slow)
+        
+        if p_fast is None or not math.isfinite(p_fast) or p_slow is None or not math.isfinite(p_slow):
+            return EvaluationResult(
+                x_sym=x_sym, y_sym=y_sym, category=cat_str, categories=categories, is_eligible=False, rejection_reason="non-finite ADF p-value"
+            )
+            
+        p_joint = max(p_fast, p_slow)
         hl = ev_calculator.cal_half_life(val_spread_fast)
     except Exception as e:
         return EvaluationResult(
             x_sym=x_sym, y_sym=y_sym, category=cat_str, categories=categories, is_eligible=False, rejection_reason=f"validation/ADF fit error: {e}"
         )
 
-    hl_ok = (hl is not None and 0 < hl <= MAX_HALF_LIFE_BARS)
     price_y = mapy_fast[latest_t_fast]
 
     return EvaluationResult(
@@ -264,6 +274,7 @@ def evaluate_pair(
         is_eligible=True,
         p_fast=p_fast,
         p_slow=p_slow,
+        p_joint=p_joint,
         beta_fast=beta_fast,
         beta_slow=beta_slow,
         alpha_fast=alpha_fast,
@@ -276,49 +287,52 @@ def evaluate_pair(
     )
 
 
-def apply_bh_correction(
-    results_list: list[EvaluationResult], alpha: float = FDR_ALPHA
-) -> tuple[float | None, float | None]:
+def apply_bh_correction(results_list: list[EvaluationResult]) -> None:
     """
     Applies the Benjamini-Hochberg (BH) False Discovery Rate (FDR) procedure
-    independently to fast and slow timeframe p-values across all eligible pairs.
-
-    1. Filters eligible pairs (m = len(results_list)).
-    2. Sorts p-values for fast and slow timeframes independently.
-    3. Finds largest index k such that p_k <= (k/m) * alpha.
-    4. Sets tradeable=True for pairs meeting BH thresholds in BOTH timeframes
-       and having valid half-life (0 < hl <= MAX_HALF_LIFE_BARS).
-
-    Returns (cutoff_fast, cutoff_slow).
+    to the joint p-values across all eligible pairs.
     """
     m = len(results_list)
     if m == 0:
-        return None, None
+        return
 
-    fast_pvals = sorted(
-        r.p_fast for r in results_list if r.p_fast is not None and math.isfinite(r.p_fast)
-    )
-    slow_pvals = sorted(
-        r.p_slow for r in results_list if r.p_slow is not None and math.isfinite(r.p_slow)
-    )
+    valid_pairs = [(i, r) for i, r in enumerate(results_list) if r.p_joint is not None and math.isfinite(r.p_joint)]
+    m_valid = len(valid_pairs)
+    
+    if m_valid == 0:
+        return
 
-    cutoff_fast = None
-    for i, p in enumerate(fast_pvals, start=1):
-        if p <= (i / m) * alpha:
-            cutoff_fast = p
-
-    cutoff_slow = None
-    for i, p in enumerate(slow_pvals, start=1):
-        if p <= (i / m) * alpha:
-            cutoff_slow = p
-
-    for r in results_list:
-        pass_fast = (cutoff_fast is not None) and (r.p_fast is not None) and (r.p_fast <= cutoff_fast)
-        pass_slow = (cutoff_slow is not None) and (r.p_slow is not None) and (r.p_slow <= cutoff_slow)
-        hl_ok = (r.half_life is not None) and (0 < r.half_life <= MAX_HALF_LIFE_BARS)
-        r.tradeable = pass_fast and pass_slow and hl_ok
-
-    return cutoff_fast, cutoff_slow
+    valid_pairs.sort(key=lambda x: x[1].p_joint)
+    
+    adjusted_values = [0.0] * m_valid
+    
+    for rank, (orig_i, r) in enumerate(valid_pairs, start=1):
+        adjusted_values[rank-1] = r.p_joint * m_valid / rank
+        
+    adjusted_values[-1] = min(adjusted_values[-1], 1.0)
+    for rank in range(m_valid - 2, -1, -1):
+        adjusted_values[rank] = min(adjusted_values[rank + 1], adjusted_values[rank], 1.0)
+        
+    for rank, (orig_i, r) in enumerate(valid_pairs):
+        r.p_joint_adj = adjusted_values[rank]
+        
+        hl_ok = (
+            r.half_life is not None
+            and math.isfinite(r.half_life)
+            and 0 < r.half_life <= MAX_HALF_LIFE_BARS
+        )
+        
+        passes_tradeable_fdr = (
+            r.p_joint_adj is not None
+            and r.p_joint_adj <= TRADEABLE_FDR_ALPHA
+        )
+        passes_candidate_fdr = (
+            r.p_joint_adj is not None
+            and r.p_joint_adj <= CANDIDATE_FDR_ALPHA
+        )
+        
+        r.tradeable = passes_tradeable_fdr and hl_ok
+        r.candidate = passes_candidate_fdr and not r.tradeable
 
 
 async def main():
@@ -398,59 +412,65 @@ async def main():
             print(f"  skip {r.x_sym}/{r.y_sym} ({r.category}): {reason}")
 
     # Apply Benjamini-Hochberg FDR correction across all eligible pairs
-    cutoff_fast, cutoff_slow = apply_bh_correction(results_list, FDR_ALPHA)
+    apply_bh_correction(results_list)
 
     winners = [r for r in results_list if r.tradeable]
     winners.sort(
         key=lambda r: (
-            r.p_fast if r.p_fast is not None else 1.0,
-            r.half_life if r.half_life is not None else 1e9,
+            r.p_joint_adj if r.p_joint_adj is not None else 1.0,
+            r.p_joint if r.p_joint is not None else 1.0,
+        )
+    )
+    
+    candidates = [r for r in results_list if r.candidate]
+    candidates.sort(
+        key=lambda r: (
+            r.p_joint_adj if r.p_joint_adj is not None else 1.0,
+            r.p_joint if r.p_joint is not None else 1.0,
         )
     )
 
     if winners:
         cat_width = max([len(r.category) for r in winners] + [len("category"), 12])
-        table_width = cat_width + 72
+        table_width = cat_width + 92
 
         print("\n" + "=" * table_width)
         print(
-            f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade"
+            f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'p_joint':>9}{'p_adj':>9}{'beta':>9}{'half_life':>11}{'bars':>7}  trade"
         )
         print("=" * table_width)
         for r in winners:
             hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
             print(
-                f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
+                f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}{r.p_joint:>9.4f}{r.p_joint_adj:>9.4f}"
                 f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}  YES"
             )
     else:
-        print("\nNo pair currently clears all three gates (fast BH, slow BH, half-life).")
+        print(f"\nNo pair passes joint BH FDR <= {TRADEABLE_FDR_ALPHA} and the half-life gate.")
         
-        # Display the 4 "best" pairs that failed the gates
-        best_losers = [r for r in results_list if r.is_eligible and r.p_fast is not None and r.p_slow is not None]
-        best_losers.sort(key=lambda r: (r.p_slow, r.p_fast))
-        top_4 = best_losers[:4]
-        
-        if top_4:
-            cat_width = max([len(r.category) for r in top_4] + [len("category"), 12])
-            table_width = cat_width + 72
-            print(f"\nHowever, here are the top {len(top_4)} closest pairs (ranked by lowest p_slow):")
-            print("=" * table_width)
+    print("\nCandidate pairs passing joint BH FDR <= 0.10\nADVISORY ONLY - NOT APPROVED FOR BOT DEPLOYMENT")
+    if candidates:
+        cat_width = max([len(r.category) for r in candidates] + [len("category"), 12])
+        table_width = cat_width + 92
+        print("=" * table_width)
+        print(
+            f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'p_joint':>9}{'p_adj':>9}{'beta':>9}{'half_life':>11}{'bars':>7}"
+        )
+        print("=" * table_width)
+        for r in candidates:
+            hl_s = f"{r.half_life:.1f}" if r.half_life is not None and math.isfinite(r.half_life) else "drift"
+            hl_status = "ok" if (r.half_life is not None and math.isfinite(r.half_life) and 0 < r.half_life <= MAX_HALF_LIFE_BARS) else "EXCESS" if (r.half_life is not None and r.half_life > MAX_HALF_LIFE_BARS) else "INVALID"
             print(
-                f"{'category':<{cat_width}}{'pair':<20}{'p_slow':>9}{'p_fast':>9}{'beta':>9}{'half_life':>11}{'bars':>7}"
+                f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}{r.p_joint:>9.4f}{r.p_joint_adj:>9.4f}"
+                f"{r.beta_fast:>9.3f}{hl_s:>11} ({hl_status:<7}) {r.n_common_fast:>7}"
             )
-            print("=" * table_width)
-            for r in top_4:
-                hl_s = f"{r.half_life:.1f}" if r.half_life is not None else "drift"
-                print(
-                    f"{r.category:<{cat_width}}{r.x_sym+'/'+r.y_sym:<20}{r.p_slow:>9.4f}{r.p_fast:>9.4f}"
-                    f"{r.beta_fast:>9.3f}{hl_s:>11}{r.n_common_fast:>7}"
-                )
+    else:
+        print("No candidate pair passes joint BH FDR <= 0.10.")
 
-    print("\n" + "=" * 98)
+    print("\n" + "=" * 105)
     if winners:
         print(
-            f"{len(winners)} tradeable pair(s) passing all 3 gates (fast BH, slow BH, "
+            f"{len(winners)} tradeable pair(s) passing all gates (joint BH FDR <= {TRADEABLE_FDR_ALPHA} and "
             f"0<half_life<={MAX_HALF_LIFE_BARS} bars), no overlapping coins:"
         )
         used_coins = set()
@@ -462,13 +482,12 @@ async def main():
             used_coins.add(r.y_sym)
             print(
                 f"  Bot {count} ({r.category}): coinlist = [\"{r.x_sym}\", \"{r.y_sym}\"]   "
-                f"# p_fast={r.p_fast:.4f}, p_slow={r.p_slow:.4f}, half_life={r.half_life:.1f} bars, price_y=${r.price_y:.3f}"
+                f"# p_joint={r.p_joint:.4f}, p_adj={r.p_joint_adj:.4f}, half_life={r.half_life:.1f} bars, price_y=${r.price_y:.3f}"
             )
             count += 1
     else:
-        print("No pair currently clears all three gates.")
+        print("No pair currently clears all gates.")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-

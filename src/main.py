@@ -22,7 +22,7 @@ import statsmodels.api as sm
 
 class PairTrading:
     def __init__(self,key,secret,symbol_list=[],qty_y=0.01):
-        self.ENTRY_PERCENTILE = 95
+        self.ENTRY_PERCENTILE = 90
         self.STOPLOSS_GAP = 2.5
         self.MAX_BAR = 8
         self.TIMEFRAME = 180 # 3min
