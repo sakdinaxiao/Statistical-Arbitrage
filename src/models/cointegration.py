@@ -18,15 +18,12 @@ class Cointegrate:
         self.retest_ticks_flat = per_hr
 
         self.counter_trade = 0
-        # bars since the last stationarity test; drives the danger-zone retest in main
-        self.danger_counter = 0
 
         
     def update(self, new_x, new_y, max_bars_trade, is_holding=False, half_life_bars=None):
         self.restest_x.append(new_x)
         self.restest_y.append(new_y)
         self.counter_trade += 1
-        self.danger_counter += 1
 
         # dynamic cadence: 1h flat, 3 * half-life while holding; bad half-life falls back to 1h
         retest_ticks = self.retest_ticks_flat
@@ -40,7 +37,6 @@ class Cointegrate:
         if not self.trade_stationary_flag or self.counter_trade >= retest_ticks:
             self.trade_stationary_flag = self.spread_stationaryTest(list_x[-max_bars_trade:],list_y[-max_bars_trade:])
             self.counter_trade = 0
-            self.danger_counter = 0
 
     def force_retest(self, max_bars_trade):
         list_x = list(self.restest_x)
@@ -48,7 +44,6 @@ class Cointegrate:
 
         self.trade_stationary_flag = self.spread_stationaryTest(list_x[-max_bars_trade:],list_y[-max_bars_trade:])
         self.counter_trade = 0
-        self.danger_counter = 0
 
     def spread_stationaryTest(self,datax,datay):
         # returns True when the ADF p-value on the spread is < 0.05; caller assigns the flag

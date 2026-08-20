@@ -27,7 +27,6 @@ class PairTrading:
         self.MAX_BAR = 8
         self.TIMEFRAME = 180 # 3min
         self.DAYS = (30*1) #1months
-        self.DANGER_ZONE_COOLDOWN = 5 # bars (15min on 3m candles) between forced danger-zone retests
 
         self.qty_y = qty_y
         self.key = key
