@@ -28,7 +28,7 @@ class Cointegrate:
         # dynamic cadence: 1h flat, 3 * half-life while holding; bad half-life falls back to 1h
         retest_ticks = self.retest_ticks_flat
         if is_holding and half_life_bars is not None and np.isfinite(half_life_bars) and half_life_bars > 0:
-            retest_ticks = 3 * half_life_bars
+            retest_ticks = 2 * half_life_bars
 
         list_x = list(self.restest_x)
         list_y = list(self.restest_y)

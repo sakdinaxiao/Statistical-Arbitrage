@@ -5,7 +5,7 @@ import numpy as np
 class StatArbStrategy:
     def __init__(self,coin_x,coin_y, entry=1.5, stoploss=4.0):
         self.entry = entry
-        self.stoploss = stoploss #tune these 3 for real market
+        self.stoploss = stoploss # tune these 3 for real market
 
         self.profit = 0.0
         
@@ -30,11 +30,11 @@ class StatArbStrategy:
         # Surgical fix: Round z_score to 1 decimal place so values close to boundaries trigger slightly earlier
         z_score = round(z_score, 1)
 
-        #hold
+        # hold
         action = Action.HOLD
         reason = f"holding: z={z_score:.3f}, state={state.name}"
 
-        if state == State.NoPosition: #look for entry
+        if state == State.NoPosition: # look for entry
             if self.stoploss > z_score >= self.entry: 
                 action = Action.SY_LX
                 reason = f"z_score: {z_score} is more than {self.entry}"
@@ -42,8 +42,8 @@ class StatArbStrategy:
                 action = Action.SX_LY
                 reason = f"z_score: {z_score} is less than {-self.entry}"
             
-        elif state == State.short_y: #on short postion
-            if z_score >= self.stoploss: #stoploss case
+        elif state == State.short_y: # on short position
+            if z_score >= self.stoploss: # stoploss case
                 action = Action.EXIT_LOSS
                 reason = f"z_score: {z_score} is hitting {self.stoploss}"
 

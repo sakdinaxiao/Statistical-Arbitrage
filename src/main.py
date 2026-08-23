@@ -2,9 +2,7 @@ import asyncio
 import sys
 import os
 from dotenv import load_dotenv
-# --- DASHBOARD START ---
 from execution.dashboard import LiveDashboard
-# --- DASHBOARD END ---
 import numpy as np
 from data.bybit_data import BybitService
 from execution.executor import OrderExecutor
@@ -23,10 +21,10 @@ import statsmodels.api as sm
 class PairTrading:
     def __init__(self,key,secret,symbol_list=[],qty_y=0.01):
         self.ENTRY_PERCENTILE = 90
-        self.STOPLOSS_GAP = 2.5
+        self.STOPLOSS_GAP = 3
         self.MAX_BAR = 8
         self.TIMEFRAME = 180 # 3min
-        self.DAYS = (30*1) #1months
+        self.DAYS = (30*1) # 1 month
 
         self.qty_y = qty_y
         self.key = key
@@ -65,7 +63,6 @@ class PairTrading:
         
         
     def update_dynamic_thresholds(self, spread_series):
-        # --- DYNAMIC Z-SCORE START ---
         # startup passes the full-history OLS spread; the loop passes the live rolling spread
         # (called only while flat, so thresholds stay frozen while holding)
         spread_arr = np.asarray(spread_series, dtype=float)
@@ -87,7 +84,6 @@ class PairTrading:
                 self.dynamic_stoploss = min(self.dynamic_entry + self.STOPLOSS_GAP,4.6)
 
         print(f"main: dynamically calculated entry z-score: {self.dynamic_entry:.3f}, stoploss: {self.dynamic_stoploss:.3f}")
-        # --- DYNAMIC Z-SCORE END ---
 
     async def initialize_math_obj(self):
         past_price_x = await self.bybit.get_past_price(self.coin_x, str(self.TIMEFRAME//60), days=self.DAYS)
@@ -97,17 +93,17 @@ class PairTrading:
             print("main: failed to initialize past price")
             raise Exception("Failed to fetch historical data")
             
-        #Align timestamps chronologically so X and Y match perfectly
+        # Align timestamps chronologically so X and Y match perfectly
         common_times = sorted(set(past_price_x.keys()).intersection(set(past_price_y.keys())))
 
-        #Extract prices into numpy arrays
+        # Extract prices into numpy arrays
         prices_x = np.array([past_price_x[t] for t in common_times])
         prices_y = np.array([past_price_y[t] for t in common_times])
         
         self.past_log_x = np.log(prices_x)
         self.past_log_y = np.log(prices_y)
         
-        #get dynamic window
+        # get dynamic window
         ols_model = sm.OLS(self.past_log_y, sm.add_constant(self.past_log_x)).fit()                                                                       
         first_alpha = ols_model.params[0]                                                                                                   
         first_beta = ols_model.params[1]                                                                                                    
@@ -134,7 +130,7 @@ class PairTrading:
             sys.exit(1)
 
 
-        #kalman spreaed z_score 
+        # kalman spread z-score 
         initx=self.past_log_x[-self.window:]
         inity=self.past_log_y[-self.window:]
 
@@ -181,14 +177,12 @@ class PairTrading:
     async def main(self):
         await self.initialize_all()
 
-        # --- DASHBOARD SETUP START ---
         self.dashboard = LiveDashboard()
         self.dashboard.start()
-        # --- DASHBOARD SETUP END ---
 
         while True:
             try:
-                #grab current prices
+                # grab current prices
                 current_prices = await self.bybit.get_current_price(self.symbol_list)
 
                 if current_prices is None:
@@ -209,8 +203,8 @@ class PairTrading:
 
                 is_holding = (self.executor.state != State.NoPosition)
 
-                #snapshot freeze: bands recalculate only while flat; an open trade
-                #keeps the exact entry/stoploss it was entered with
+                # snapshot freeze: bands recalculate only while flat; an open trade
+                # keeps the exact entry/stoploss it was entered with
                 if not is_holding:
                     self.update_dynamic_thresholds(self.welford.get_spread_series())
                     self.strategy.entry = self.dynamic_entry
@@ -225,25 +219,24 @@ class PairTrading:
                 z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
 
 
-                #fresh half-life from the just-updated spread series drives the retest cadence
+                # fresh half-life from the just-updated spread series drives the retest cadence
                 fresh_half_life = self.ev_calculator.cal_half_life(self.welford.get_spread_series())
 
-                #update staionary list (dynamic cadence: 1h flat, 3 * half-life while holding)
+                # update stationary list (dynamic cadence: 1h flat, 3 * half-life while holding)
                 self.cointegration.update(logPrice_x, logPrice_y, self.max_bars, is_holding=is_holding, half_life_bars=fresh_half_life)
 
-                #check for stationary while trading
+                # check for stationary while trading
                 is_trade_stat = self.cointegration.trade_stationary_flag
                 if not is_trade_stat:
-                    print("main: it's not stationary. Skipping entries.")
+                    print("main: it's not stationary. Skipping entries and halving stoploss.")
+                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0) / 2.0
+                else:
+                    self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
 
-                self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
-
-                # --- RESET RULE START ---
                 # stoploss cooldown lifts only when z cools below half the entry line
                 if self.needs_reset and z_score is not None and not np.isnan(z_score) and abs(z_score) < self.strategy.entry / 2.0:
                     self.needs_reset = False
                     print("main: z-score cooled off. Stoploss cooldown lifted.")
-                # --- RESET RULE END ---
 
                 signal = self.strategy.create_signal(
                     z_score=z_score,
@@ -257,14 +250,12 @@ class PairTrading:
                 if signal.action != Action.HOLD and signal.action != Action.INVALID:
                     is_entry = (signal.action in [Action.SY_LX, Action.SX_LY])
 
-                    #stoploss cooldown bans all new entries until the z-score resets
+                    # stoploss cooldown bans all new entries until the z-score resets
                     if is_entry and self.needs_reset:
                         print("main: stoploss cooldown active. Blocking entry.")
 
-                        # --- LOGGER WIRE START ---
                         if getattr(self, 'logger', None) is not None:
                             self.logger.log_blocked(signal, "stoploss cooldown active")
-                        # --- LOGGER WIRE END ---
 
                         signal.action = Action.HOLD
                         is_entry = False
@@ -275,14 +266,12 @@ class PairTrading:
                         self.cointegration.force_retest(self.max_bars)
                         is_trade_stat = self.cointegration.trade_stationary_flag
 
-                    #check for blocking
+                    # check for blocking
                     if is_entry and (not is_trade_stat or is_Beta_spike):
                         print("main: Market non-stationary or beta spike. Blocking entry.")
 
-                        # --- LOGGER WIRE START ---
                         if getattr(self, 'logger', None) is not None:
                             self.logger.log_blocked(signal, "Market non-stationary or beta spike")
-                        # --- LOGGER WIRE END ---
 
                         signal.action = Action.HOLD
                         is_entry = False
@@ -291,27 +280,24 @@ class PairTrading:
                         spread_series = self.welford.get_spread_series()                                          
                         profitable, ev = self.ev_calculator.assess(z_score, beta, raw_y, spread_series)
 
-                        #check for EV
+                        # check for EV
                         if not profitable:
                             print(f"main: Trade {signal.action.name} rejected EV is negative")
 
-                            # --- LOGGER WIRE START ---
                             if getattr(self, 'logger', None) is not None:
                                 self.logger.log_blocked(signal, "EV is negative")
-                            # --- LOGGER WIRE END ---
 
                             signal.action = Action.HOLD
                     
-                    #closing
+                    # closing
                     if signal.action != Action.HOLD:                                                                              
                             await self.executor.execute_signal(signal)
 
-                            #stoploss hit -> ban re-entry until the z-score resets
+                            # stoploss hit -> ban re-entry until the z-score resets
                             if signal.action == Action.EXIT_LOSS:
                                 self.needs_reset = True
                                 print("main: stoploss hit. Cooldown active until z-score resets.")
 
-                # --- DASHBOARD UPDATE START ---
                 try:
                     is_trade_stat = getattr(self, 'cointegration', None) and self.cointegration.trade_stationary_flag
                     pair_str = f"{self.coin_x} / {self.coin_y}"
@@ -338,11 +324,10 @@ class PairTrading:
                         raw_y, 
                         current_ev, 
                         getattr(self, 'dynamic_entry', 1.5),
-                        getattr(self, 'dynamic_stoploss', 4.0)
+                        self.strategy.stoploss
                     )
                 except Exception:
                     pass
-                # --- DASHBOARD UPDATE END ---
 
                 await asyncio.sleep(self.TIMEFRAME)
             except Exception as e:
@@ -364,7 +349,7 @@ if __name__ == "__main__":
         print("Error: API_KEY and API_SECRET must be set in the .env file.")
         sys.exit(1)
         
-    # Define your pairs here cheaper one comefirst
+    # Define your pairs here (cheaper one comes first)
     symbols = ["ETHUSDT", "BTCUSDT"]
     
     bot = PairTrading(key=api_key, secret=api_secret, symbol_list=symbols)

@@ -16,7 +16,7 @@ import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
 
 # note: tickers verified against Bybit linear perps (2026-08). MEME small-caps
-# trade as 1000x-unit contracts (SHIB1000, 1000PEPE, ...). MKR trades as SKYUSDT.
+# trade as 1000x-unit contracts (1000SHIB, 1000PEPE, ...). MKR trades as SKYUSDT.
 # delisted/never-listed: TON, FET, TRU, OM.
 CRYPTO_UNIVERSES = {
     "C1_MAJORS": [
@@ -38,13 +38,13 @@ CRYPTO_UNIVERSES = {
         "BTCUSDT", "WBTCUSDT", "ETHUSDT", "STETHUSDT"
     ],
     "C7_AI": [
-        "FETUSDT", "RNDRUSDT", "TAOUSDT"
+        "RNDRUSDT", "TAOUSDT"
     ],
     "C8_GAMING": [
         "IMXUSDT", "GALAUSDT", "SANDUSDT", "MANAUSDT"
     ],
     "C9_MEMES": [
-        "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "WIFUSDT", "BONKUSDT"
+        "DOGEUSDT", "1000SHIBUSDT", "1000PEPEUSDT", "WIFUSDT", "1000BONKUSDT"
     ]
 }
 

@@ -8,7 +8,7 @@ class _Median_engine:
         self.window = window
         self.max = []
         self.min = []
-        #use deque insted of list cause it better
+        # use deque instead of list
         self.timeline = deque()
         self.graveyard = defaultdict(int)
         self.balance = 0
@@ -17,7 +17,7 @@ class _Median_engine:
         while heap:
             top_val = -heap[0] if is_max else heap[0]
             
-            #kick ghost out
+            # kick ghost out
             if self.graveyard[top_val] > 0 :
                 self.graveyard[top_val] -= 1
                 heapq.heappop(heap)
@@ -28,14 +28,14 @@ class _Median_engine:
         if len(self.timeline) == self.window:
             old_num = self.timeline.popleft()
             self.graveyard[old_num] += 1
-            #calculate balance
+            # calculate balance
             # self.max[0] is the NEGATED stored value; actual max-heap top is -self.max[0]
             if self.max and old_num <= -self.max[0]:
                 self.balance -= 1
             else:
                 self.balance += 1
         
-        #it not full now
+        # it is not full now
         self.timeline.append(num)
         if not self.max or num <= -self.max[0]:
             heapq.heappush(self.max,-num)
@@ -44,7 +44,7 @@ class _Median_engine:
             heapq.heappush(self.min,num)
             self.balance -= 1
 
-        #invariant: len(max) >= len(min), so balance in {0, 1}
+        # invariant: len(max) >= len(min), so balance in {0, 1}
         if self.balance > 1:
             item = heapq.heappop(self.max)
             heapq.heappush(self.min,-item)

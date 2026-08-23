@@ -19,7 +19,7 @@ class Kalman_2D:
         delta_beta = self.p[1,1] * q_frac
         self.Q = np.array([[delta_alpha, 0], [0, delta_beta]])
         
-        #Do S*S.T = original matrix prevent negative number from rounding the precision
+        # Do S*S.T = original matrix prevent negative number from rounding the precision
         
         self.s = np.linalg.cholesky(self.p)
         self.s_q = np.linalg.cholesky(self.Q)
@@ -58,7 +58,7 @@ class Kalman_2D:
         else:
             ht = np.array([[1,x]])
             M = np.vstack((self.s.T, self.s_q.T))
-            #qr composition
+            # qr decomposition
             _, r = np.linalg.qr(M)
             self.s = r.T
             
@@ -77,7 +77,7 @@ class Kalman_2D:
             self.s = z_val.T
 
             et = et.item()
-            # z_score = et / abs(x_val).item()
+            # z-score = et / abs(x_val).item()
             
             alpha_now = self.theta[0].item()
             beta_now = self.theta[1].item()

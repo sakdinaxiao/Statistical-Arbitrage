@@ -89,7 +89,7 @@ class OrderExecutor:
         
         x_side = "Sell" if y_side == "Buy" else "Buy"
 
-        #lot size rounding 
+        # lot size rounding 
         raw_qty_x = abs(signal.beta) * self.qty_y * (signal.price_y / signal.price_x)
         qty_x = float(self._round_qty(raw_qty_x, signal.coin_x))
         qty_y_rounded = float(self._round_qty(self.qty_y, signal.coin_y))
@@ -97,7 +97,7 @@ class OrderExecutor:
         val_x = qty_x * signal.price_x
         val_y = qty_y_rounded * signal.price_y
 
-        #pump up to minimum value
+        # pump up to minimum value
         final_qty_y = qty_y_rounded
         if val_x < 5.5 or val_y < 5.5:
             raw_val_x = raw_qty_x * signal.price_x
@@ -120,11 +120,11 @@ class OrderExecutor:
         print(f"Y {signal.coin_y}: {y_side} {final_qty_y} -> {res_y}")
         print(f"X {signal.coin_x}: {x_side} {qty_x} -> {res_x}")       
 
-        #log order
+        # log order
         if self.logger is not None:
             self.logger.log_order(signal, qty_x, final_qty_y, res_y is not None, res_x is not None)
 
-        #if one leg fail
+        # if one leg fails
         if res_y is None or res_x is None:
             if reduceOnly:
                 print("executor: WARNING one exit leg failed -- leaving remaining leg for next retry")
