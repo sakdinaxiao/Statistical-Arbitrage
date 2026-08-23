@@ -13,7 +13,7 @@ This project demonstrates advanced quantitative finance concepts, low-latency as
 
 ---
 
-## 🚀 Core Features
+## Core Features
 
 ### 1. Quantitative Pairs Discovery
 The engine includes a robust pair-scanner designed to eliminate spurious correlations and discover true cointegration:
@@ -39,7 +39,7 @@ Capital preservation is hardcoded into the pipeline:
 
 ---
 
-## 🛠️ System Architecture
+## System Architecture
 
 ```text
 statArb/
@@ -63,7 +63,7 @@ statArb/
 
 ---
 
-## ⚙️ Installation & Usage
+## Installation & Usage
 
 ### Prerequisites
 - **Python 3.10+**
@@ -98,5 +98,5 @@ The CLI dashboard will launch, streaming real-time Z-scores, Beta, EV, and activ
 
 ---
 
-## 📊 Disclaimer
+## Disclaimer
 This software is provided for educational and portfolio demonstration purposes only. It is not financial advice. Quantitative models are subject to structural market breaks and execution risks (slippage, API latency, exchange downtime). **Trade at your own risk.**

@@ -93,17 +93,14 @@ class PairTrading:
             print("main: failed to initialize past price")
             raise Exception("Failed to fetch historical data")
             
-        # Align timestamps chronologically so X and Y match perfectly
         common_times = sorted(set(past_price_x.keys()).intersection(set(past_price_y.keys())))
 
-        # Extract prices into numpy arrays
         prices_x = np.array([past_price_x[t] for t in common_times])
         prices_y = np.array([past_price_y[t] for t in common_times])
         
         self.past_log_x = np.log(prices_x)
         self.past_log_y = np.log(prices_y)
         
-        # get dynamic window
         ols_model = sm.OLS(self.past_log_y, sm.add_constant(self.past_log_x)).fit()                                                                       
         first_alpha = ols_model.params[0]                                                                                                   
         first_beta = ols_model.params[1]                                                                                                    
@@ -122,7 +119,6 @@ class PairTrading:
 
         print(f"main: successfully prepared {len(common_times)} log prices")
 
-        # test the short-term 8h stationarity window
         self.cointegration = Cointegrate(self.TIMEFRAME, self.past_log_x, self.past_log_y)
         self.cointegration.trade_stationary_flag = self.cointegration.spread_stationaryTest(self.past_log_x[-self.max_bars:], self.past_log_y[-self.max_bars:])
         if self.cointegration.trade_stationary_flag is False:
@@ -130,7 +126,6 @@ class PairTrading:
             sys.exit(1)
 
 
-        # kalman spread z-score 
         initx=self.past_log_x[-self.window:]
         inity=self.past_log_y[-self.window:]
 
@@ -182,7 +177,6 @@ class PairTrading:
 
         while True:
             try:
-                # grab current prices
                 current_prices = await self.bybit.get_current_price(self.symbol_list)
 
                 if current_prices is None:
@@ -219,13 +213,10 @@ class PairTrading:
                 z_score  = self.welford.z_score_cal(logPrice_x,logPrice_y,alpha,beta,is_holding, spread=et)
 
 
-                # fresh half-life from the just-updated spread series drives the retest cadence
                 fresh_half_life = self.ev_calculator.cal_half_life(self.welford.get_spread_series())
 
-                # update stationary list (dynamic cadence: 1h flat, 3 * half-life while holding)
                 self.cointegration.update(logPrice_x, logPrice_y, self.max_bars, is_holding=is_holding, half_life_bars=fresh_half_life)
 
-                # check for stationary while trading
                 is_trade_stat = self.cointegration.trade_stationary_flag
                 if not is_trade_stat:
                     print("main: it's not stationary. Skipping entries and halving stoploss.")
@@ -233,7 +224,6 @@ class PairTrading:
                 else:
                     self.strategy.stoploss = getattr(self, 'dynamic_stoploss', 4.0)
 
-                # stoploss cooldown lifts only when z cools below half the entry line
                 if self.needs_reset and z_score is not None and not np.isnan(z_score) and abs(z_score) < self.strategy.entry / 2.0:
                     self.needs_reset = False
                     print("main: z-score cooled off. Stoploss cooldown lifted.")
@@ -250,7 +240,6 @@ class PairTrading:
                 if signal.action != Action.HOLD and signal.action != Action.INVALID:
                     is_entry = (signal.action in [Action.SY_LX, Action.SX_LY])
 
-                    # stoploss cooldown bans all new entries until the z-score resets
                     if is_entry and self.needs_reset:
                         print("main: stoploss cooldown active. Blocking entry.")
 
@@ -260,13 +249,11 @@ class PairTrading:
                         signal.action = Action.HOLD
                         is_entry = False
 
-                    # force stationary test right before entry
                     if is_entry:
                         print("main: Forcing stationarity test before entry.")
                         self.cointegration.force_retest(self.max_bars)
                         is_trade_stat = self.cointegration.trade_stationary_flag
 
-                    # check for blocking
                     if is_entry and (not is_trade_stat or is_Beta_spike):
                         print("main: Market non-stationary or beta spike. Blocking entry.")
 
@@ -280,7 +267,6 @@ class PairTrading:
                         spread_series = self.welford.get_spread_series()                                          
                         profitable, ev = self.ev_calculator.assess(z_score, beta, raw_y, spread_series)
 
-                        # check for EV
                         if not profitable:
                             print(f"main: Trade {signal.action.name} rejected EV is negative")
 
@@ -289,11 +275,9 @@ class PairTrading:
 
                             signal.action = Action.HOLD
                     
-                    # closing
                     if signal.action != Action.HOLD:                                                                              
                             await self.executor.execute_signal(signal)
 
-                            # stoploss hit -> ban re-entry until the z-score resets
                             if signal.action == Action.EXIT_LOSS:
                                 self.needs_reset = True
                                 print("main: stoploss hit. Cooldown active until z-score resets.")
