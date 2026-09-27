@@ -7,19 +7,22 @@ class ExpectedValueCalculator:
         self.qty_y = qty_y
         self.fee_rate = fee_rate
         self.max_bars = max_bars   # 60 bars * 5min = 5h, skip trades slower than this
-        self.halflife = 0
+        self.halflife = None
 
     def cal_half_life(self, spread_series):
         # AR(1) on the spread: delta = lam*level + c. lam < 0 means mean reverting.
+        self.halflife = None
         s = np.asarray(spread_series, dtype=float)
-        if len(s) < 2:
+        if len(s) < 3 or not np.all(np.isfinite(s)):
             return None
 
         lag = s[:-1]
         delta = s[1:] - lag
+        if np.ptp(lag) == 0:
+            return None
 
         lam, c = np.polyfit(lag, delta, 1)
-        if lam >= 0:
+        if not np.isfinite(lam) or lam >= 0:
             return None   # spread is drifting, not coming back
 
         self.halflife = -np.log(2) / lam
@@ -29,7 +32,7 @@ class ExpectedValueCalculator:
         # gate 0: missing data guards
         if z_score is None or beta is None or price_y is None:
             return False, 0
-        if np.isnan(z_score) or np.isnan(beta):
+        if not np.all(np.isfinite([z_score, beta, price_y])) or price_y <= 0:
             return False, 0
 
         hl = self.halflife
@@ -49,9 +52,7 @@ class ExpectedValueCalculator:
         ev = expected_profit - cost
 
         # gate 2: profit must beat the fees
-        if ev <= 0:
+        if not np.isfinite(ev) or ev <= 0:
             return False, ev
 
         return True , ev
-
-        

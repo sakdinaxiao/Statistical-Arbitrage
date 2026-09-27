@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from execution.dashboard import LiveDashboard
 import numpy as np
 from data.bybit_data import BybitService
-from execution.executor import OrderExecutor
+from execution.executor import OrderExecutor, ExecutionHalted
 from execution.strategy import StatArbStrategy
 from models.welford import WelfordZScore
 from models.expected_value import ExpectedValueCalculator
@@ -53,10 +53,15 @@ class PairTrading:
         )
         
         self.rules = await self.bybit.get_instruments_info(self.symbol_list)
+        if not self.rules or any(symbol not in self.rules for symbol in self.symbol_list):
+            raise RuntimeError("Cannot start without instrument rules for both legs")
         
         status = self.bybit.get_account_status()
-        positions = status.get("positions", []) if status else []
-        self.recovered_state = self.bybit.sync_state(positions, self.symbol_list[1])
+        if not isinstance(status, dict) or not isinstance(status.get("positions"), list):
+            raise RuntimeError("Account recovery failed; refusing to assume the pair is flat")
+        self.recovered_state = self.bybit.sync_state(status["positions"], self.coin_x, self.coin_y)
+        if self.recovered_state != State.NoPosition:
+            raise RuntimeError("Open pair found. Close it manually before restarting; entry model state is not persisted")
         
         print(f"main: Recovered state -> {self.recovered_state.name}")
 
@@ -111,7 +116,9 @@ class PairTrading:
 
         self.ev_calculator = ExpectedValueCalculator(self.qty_y, self.FEERATE,self.max_bars)
         first_hl = self.ev_calculator.cal_half_life(historical_spread)
-        self.window = int(first_hl * 2)
+        if first_hl is None or not np.isfinite(first_hl) or first_hl <= 0:
+            raise RuntimeError("Historical spread has no valid mean-reverting half-life")
+        self.window = max(3, int(first_hl * 2))
         
         if len(common_times) < self.window:
             print(f"main: not enough overlapping historical data (found {len(common_times)})")
@@ -314,6 +321,9 @@ class PairTrading:
                     pass
 
                 await asyncio.sleep(self.TIMEFRAME)
+            except ExecutionHalted:
+                self.dashboard.stop()
+                raise
             except Exception as e:
                 import traceback
                 print(f'CRITICAL ERROR in main loop: {e}')
@@ -330,7 +340,7 @@ if __name__ == "__main__":
     api_secret = os.getenv("SECRET")
     
     if not api_key or not api_secret:
-        print("Error: API_KEY and API_SECRET must be set in the .env file.")
+        print("Error: KEY and SECRET must be set in the .env file.")
         sys.exit(1)
         
     # Define your pairs here (cheaper one comes first)
@@ -342,3 +352,6 @@ if __name__ == "__main__":
         asyncio.run(bot.main())
     except KeyboardInterrupt:
         print("\nBot stopped by user.")
+    except ExecutionHalted as e:
+        print(f"Trading halted: {e}. Check both positions and open orders manually before restarting.")
+        sys.exit(1)

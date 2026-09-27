@@ -1,4 +1,5 @@
 import asyncio
+import math
 from datetime import datetime, timedelta
 from pybit.unified_trading import HTTP
 from pybit.exceptions import FailedRequestError, InvalidRequestError
@@ -126,13 +127,26 @@ class BybitService:
         # live wallet + open positions for the dashboard; refreshed each candle.
         try:
             wallet = self.session.get_wallet_balance(accountType="UNIFIED")["result"]["list"][0]
-            pos_list = self.session.get_positions(category="linear", settleCoin="USDT")["result"]["list"]
+            pos_list = []
+            cursor = ""
+            while True:
+                response = self.session.get_positions(category="linear", settleCoin="USDT", cursor=cursor)
+                if response.get("retCode") != 0:
+                    raise RuntimeError("Position lookup failed")
+                pos_list.extend(response["result"]["list"])
+                next_cursor = response["result"].get("nextPageCursor", "")
+                if not next_cursor:
+                    break
+                if next_cursor == cursor:
+                    raise RuntimeError("Position pagination did not advance")
+                cursor = next_cursor
 
             positions = [
                 {
                     "symbol": p["symbol"],
                     "side": p["side"],
                     "size": p["size"],
+                    "positionIdx": p["positionIdx"],
                     "avgPrice": p["avgPrice"],
                     "markPrice": p["markPrice"],
                 }
@@ -169,16 +183,20 @@ class BybitService:
             print(f"api: failed to fetch instrument info: {e}")
             return None
 
-    def sync_state(self, positions: list, coin_y: str) -> State:
-        # Check open positions to recover the bot's state without making a second API call
-        if not positions:
-            return State.NoPosition
-
+    def sync_state(self, positions: list, coin_x: str, coin_y: str) -> State:
+        active = {}
         for p in positions:
-            if p["symbol"] == coin_y and float(p["size"]) > 0:
-                if p["side"] == "Sell":
-                    return State.short_y
-                elif p["side"] == "Buy":
-                    return State.long_y
-                    
-        return State.NoPosition
+            if p["symbol"] not in (coin_x, coin_y):
+                continue
+            size = float(p["size"])
+            if not math.isfinite(size) or size < 0 or p["positionIdx"] != 0:
+                raise RuntimeError("Invalid position or unsupported hedge mode")
+            if size > 0:
+                if p["symbol"] in active or p["side"] not in ("Buy", "Sell"):
+                    raise RuntimeError("Ambiguous pair positions")
+                active[p["symbol"]] = p["side"]
+        if not active:
+            return State.NoPosition
+        if len(active) != 2 or active[coin_x] == active[coin_y]:
+            raise RuntimeError("Unbalanced pair found; reconcile both legs manually")
+        return State.short_y if active[coin_y] == "Sell" else State.long_y
